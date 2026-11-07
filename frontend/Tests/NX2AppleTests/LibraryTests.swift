@@ -1002,6 +1002,10 @@ import NXModel
             try FileManager.default.setAttributes([.modificationDate: hour], ofItemAtPath: ipa)
             modelStores.deviceStore.exportIPA = true
             try capture("iphone-app", height: 1400, page: .iphone)
+            modelStores.deviceStore.sendWhere = SendWhere.drive
+            modelStores.deviceStore.driveFolder = temporary.path
+            try capture("iphone-app-drive", height: 1400, page: .iphone)
+            modelStores.deviceStore.sendWhere = SendWhere.device
             modelStores.deviceStore.exportIPA = false
             try capture("iphone-app-install", page: .iphone)
             model.target = BuildTarget.ios

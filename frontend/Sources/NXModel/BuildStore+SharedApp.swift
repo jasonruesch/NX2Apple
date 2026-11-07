@@ -79,6 +79,34 @@ extension BuildStore {
         sendGameData(bundle: bundle)
     }
 
+    /// The game data of one game onto the chosen drive or folder, in `<folder>/<title ID>/`, for the iPhone's Game data folder. A drive
+    /// that cannot take it (read-only, FAT32 with a file over 4 GB, too little space) says so instead of copying.
+    package func copySharedDataToDrive(titleID: String, archive: String) {
+        guard !running, !archive.isEmpty, !devices.driveFolder.isEmpty else { return }
+        let ipa = ShellInstall.ipaPath(root: shellRoot)
+        guard FileManager.default.fileExists(atPath: ipa) else { return }
+        sharedJob = .send
+        archivePath = archive
+        exportedIPAPath = ipa
+        refreshDrive()
+        if let why = driveRefusal() { send = .failed(why); return }
+        copyToDrive()
+    }
+
+    /// Why the chosen folder cannot take the game data, nil when it can.
+    func driveRefusal() -> String? {
+        var folder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: devices.driveFolder, isDirectory: &folder), folder.boolValue, let drive, drive.volume != nil else {
+            return String(format: t("shared.driveGone"), shortPath(devices.driveFolder))   // a drive not connected: nothing is written to this Mac instead
+        }
+        switch drive.problem {
+        case .readOnly: return t("shell.driveReadOnly")
+        case .fat32: return t("shell.driveFat32")
+        case .noSpace(let needed, let free): return String(format: t("shell.driveNoSpace"), ShellInstall.sizeText(needed), ShellInstall.sizeText(free))
+        case nil: return nil
+        }
+    }
+
     /// Takes a game out of the shared app. Its build stays on this Mac; the next install or export leaves it out.
     package func removeFromSharedApp(titleID: String) {
         guard !running else { return }

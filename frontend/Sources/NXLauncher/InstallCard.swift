@@ -83,9 +83,25 @@ package struct SharedAppTargetCard: View {
                     .frame(width: ExportGrid.switchWidth)
             }
             CardDivider()
-            CardRow(loc.t(devices.exportIPA ? "shared.sendTo" : "dev.target"), detail: devices.checked && devices.devices.isEmpty ? loc.t("dev.noDevices") : "") {
-                RefreshDevicesButton(devices: devices)
-                LauncherDropdown(options: options, selection: devices.installDevice, label: loc.t("dev.target")) { devices.installDevice = $0 }
+            if devices.exportIPA {
+                // After an export the game data goes to the device the IPA is on, or onto a drive the iPhone reads it from
+                CardRow(loc.t("shared.sendTo")) {
+                    LauncherSegmented(options: [(SendWhere.device, loc.t("shell.whereDevice")), (SendWhere.drive, loc.t("shell.whereDrive"))],
+                                      selection: devices.sendWhere) { devices.sendWhere = $0; build.send = .idle }
+                        .frame(width: ExportGrid.switchWidth)
+                }
+                CardDivider()
+            }
+            if devices.exportIPA && devices.sendWhere == SendWhere.drive {
+                CardRow(loc.t("shared.driveFolder"), detail: devices.driveFolder.isEmpty ? loc.t("shell.driveNone") : build.shortPath(devices.driveFolder),
+                        help: devices.driveFolder) {
+                    Button(loc.t("shell.driveChoose")) { build.chooseDriveFolder() }
+                }
+            } else {
+                CardRow(loc.t("dev.target"), detail: devices.checked && devices.devices.isEmpty ? loc.t("dev.noDevices") : "") {
+                    RefreshDevicesButton(devices: devices)
+                    LauncherDropdown(options: options, selection: devices.installDevice, label: loc.t("dev.target")) { devices.installDevice = $0 }
+                }
             }
             if !devices.exportIPA, !devices.installDevice.isEmpty {
                 CardDivider()

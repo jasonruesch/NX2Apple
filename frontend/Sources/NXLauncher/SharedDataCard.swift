@@ -27,11 +27,20 @@ package struct SharedDataCard: View {
     }
 
     package var body: some View {
-        CardGroup(loc.t("shared.sendSection"), footnote: loc.t(devices.installDevice.isEmpty ? "shared.sendNeedsDevice" : "shared.sendNote")) {
+        CardGroup(loc.t("shared.sendSection"), footnote: footnote) {
             ForEach(Array(games.enumerated()), id: \.element.id) { index, game in
                 if index > 0 { CardDivider() }
                 CardRow(game.name, detail: detail(game), dot: dot(game), help: game.archive) {
-                    if !game.archive.isEmpty {
+                    if game.archive.isEmpty {
+                        EmptyView()
+                    } else if toDrive {
+                        if isCurrent(game), case .copying = build.send {
+                            Button(loc.t("btn.stop")) { build.stopDriveCopy() }
+                        } else {
+                            Button(loc.t("shell.driveCopy")) { build.copySharedDataToDrive(titleID: game.titleID, archive: game.archive) }
+                                .disabled(build.running || devices.driveFolder.isEmpty)
+                        }
+                    } else {
                         Button(loc.t("shell.sendButton")) { build.sendSharedData(titleID: game.titleID, archive: game.archive) }
                             .disabled(build.running || devices.installDevice.isEmpty)
                     }
@@ -56,6 +65,17 @@ package struct SharedDataCard: View {
         }
     }
 
+    private var toDrive: Bool { devices.sendWhere == SendWhere.drive }
+
+    /// What the card's foot says: where the data goes, and what is still to choose.
+    private var footnote: String {
+        if toDrive {
+            return devices.driveFolder.isEmpty ? loc.t("shared.driveNeedsFolder")
+                : String(format: loc.t("shared.driveNote"), L10n.string("ios.ui.gameData", loc.lang))
+        }
+        return loc.t(devices.installDevice.isEmpty ? "shared.sendNeedsDevice" : "shared.sendNote")
+    }
+
     /// The game whose data the last send was for.
     private func isCurrent(_ game: Entry) -> Bool {
         !build.archivePath.isEmpty && build.archivePath == game.archive
@@ -73,6 +93,9 @@ package struct SharedDataCard: View {
         case .refused: return loc.t("shell.sendRefused")
         case .failed(let why): return why
         case .chooseApp: return loc.t("shell.sendSeveral")
+        case .copying(let done, let total):
+            return String(format: loc.t("shell.driveProgress"), game.name, ShellInstall.sizeText(done), ShellInstall.sizeText(total))
+        case .copied(let folder): return String(format: loc.t("shared.driveCopied"), build.shortPath(folder))
         default: return build.shortPath(game.archive)
         }
     }
@@ -81,8 +104,9 @@ package struct SharedDataCard: View {
         guard isCurrent(game) else { return nil }
         switch build.send {
         case .sent: return LauncherPalette.ready
-        case .sending: return LauncherPalette.building
-        case .idle, .copying, .copied: return nil
+        case .sending, .copying: return LauncherPalette.building
+        case .copied: return LauncherPalette.ready
+        case .idle: return nil
         default: return LauncherPalette.building
         }
     }
