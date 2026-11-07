@@ -1307,7 +1307,6 @@
   "prog.unit.batches": "バッチ",
   "queue.buildIOS": "iPhone 用にビルド",
   "queue.buildMac": "Mac 用にビルド",
-  "queue.busy": "別のビルドが実行中でした。",
   "queue.cancel": "残りをキャンセル",
   "queue.cancelled": "キャンセル済み",
   "queue.clear": "クリア",

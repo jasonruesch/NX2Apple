@@ -269,9 +269,10 @@ struct LauncherView: View {
                 DispatchQueue.main.async {
                     guard !m.running else { return }   // a build may have started since the idle notification
                     if m.done { recordBuild() }
-                    let queued = m.sharedJob == nil
+                    // The queue learns which game ended and how, as they are now: a second report of the same end finds no game
+                    let ended = m.sharedJob == nil ? activeBuildID : nil, ok = m.done, note = m.doneNote
                     activeBuildID = nil
-                    if queued { DispatchQueue.main.async { queue.buildEnded(ok: m.done, note: m.doneNote) } }
+                    DispatchQueue.main.async { queue.buildEnded(id: ended, ok: ok, note: note) }   // any end lets a waiting game start
                     engine.applyPendingEngine()   // an engine installed during the build takes over once it is recorded
                 }
             }

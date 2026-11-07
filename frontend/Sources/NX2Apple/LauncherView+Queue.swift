@@ -34,22 +34,26 @@ extension LauncherView {
     /// Sets up one queued game as Build again does, for the queue's target, and starts it.
     func startQueued(_ id: UUID, target: String) -> BuildQueue.Start {
         guard let game = library.games.first(where: { $0.id == id }) else { return .skipped(loc.t("queue.gone")) }
-        guard !m.running else { return .skipped(loc.t("queue.busy")) }
+        guard !m.running else { return .busy }   // it starts when the running build ends
         let hasFiles = game.inputs[GameLibrary.folderInput]?.isEmpty == false || game.inputs["base", default: []].isEmpty == false
         guard hasFiles else { return .skipped(loc.t("queue.noFiles")) }
         configureBuild(game)
         m.target = target
         guard m.canBuild else { return .skipped(m.doneNote.isEmpty ? loc.t("queue.noFiles") : m.doneNote) }
+        _ = library.rememberInputs(m)
+        activeBuildID = game.id   // the queue's game, so its end reaches the queue under this id
         m.startBuild()
         if m.running || !m.staleFrameworks.isEmpty { return .started }
+        activeBuildID = nil
         return .skipped(m.doneNote)
     }
 
     /// The stale frameworks question was answered: Stop ended the queued build before it ran, Continue started it.
     func staleAnswered() {
         DispatchQueue.main.async {
-            guard !m.running, queue.building != nil else { return }
-            queue.buildEnded(ok: false, note: loc.t("msg.stopped"))
+            guard !m.running, let id = queue.building?.id else { return }
+            activeBuildID = nil   // the build never ran: the next one is not recorded for this game
+            queue.buildEnded(id: id, ok: false, note: loc.t("msg.stopped"))
         }
     }
 

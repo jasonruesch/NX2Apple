@@ -34,6 +34,8 @@ import NXCore
         case started
         /// It could not start, with the reason the queue shows.
         case skipped(String)
+        /// Another build runs: the game waits, and the queue tries again when that build ends.
+        case busy
     }
 
     @Published package private(set) var entries: [Entry] = []
@@ -64,15 +66,19 @@ import NXCore
             entries[index].state = .building
             switch start(entries[index].id, entries[index].target) {
             case .started: return
+            case .busy: entries[index].state = .waiting; return
             case .skipped(let why): entries[index].state = .skipped(why)
             }
         }
     }
 
-    /// The building game's build ended: done, or failed with the build's note. The next game starts.
-    package func buildEnded(ok: Bool, note: String) {
-        guard let index = entries.firstIndex(where: { $0.state == .building }) else { return }
-        entries[index].state = ok ? .done : .failed(note)
+    /// The build of the game `id` ended: done, or failed with the build's note. The next game starts. An end for another game (a
+    /// build the player started themselves, or a second report of one that ended already) changes no entry, and only lets a game
+    /// that waited for that build start.
+    package func buildEnded(id: UUID?, ok: Bool, note: String) {
+        if let id, let index = entries.firstIndex(where: { $0.id == id && $0.state == .building }) {
+            entries[index].state = ok ? .done : .failed(note)
+        }
         next()
     }
 

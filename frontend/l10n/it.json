@@ -1302,7 +1302,6 @@
   "prog.unit.batches": "lotti",
   "queue.buildIOS": "Compila per iPhone",
   "queue.buildMac": "Compila per Mac",
-  "queue.busy": "Era in corso un’altra build.",
   "queue.cancel": "Annulla il resto",
   "queue.cancelled": "Annullato",
   "queue.clear": "Cancella",

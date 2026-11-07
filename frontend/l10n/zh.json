@@ -1311,7 +1311,6 @@
   "prog.unit.batches": "批",
   "queue.buildIOS": "为 iPhone 构建",
   "queue.buildMac": "为 Mac 构建",
-  "queue.busy": "另一个构建正在运行。",
   "queue.cancel": "取消其余",
   "queue.cancelled": "已取消",
   "queue.clear": "清除",

@@ -1293,7 +1293,6 @@
   "prog.unit.batches": "lots",
   "queue.buildIOS": "Compiler pour iPhone",
   "queue.buildMac": "Compiler pour Mac",
-  "queue.busy": "Une autre compilation était en cours.",
   "queue.cancel": "Annuler le reste",
   "queue.cancelled": "Annulé",
   "queue.clear": "Effacer",

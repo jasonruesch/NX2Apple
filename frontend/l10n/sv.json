@@ -1146,7 +1146,6 @@
   "prog.unit.batches": "batcher",
   "queue.buildIOS": "Bygg för iPhone",
   "queue.buildMac": "Bygg för Mac",
-  "queue.busy": "Ett annat bygge pågick.",
   "queue.cancel": "Avbryt resten",
   "queue.cancelled": "Avbruten",
   "queue.clear": "Rensa",

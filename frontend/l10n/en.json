@@ -1310,7 +1310,6 @@
   "prog.unit.batches": "batches",
   "queue.buildIOS": "Build for iPhone",
   "queue.buildMac": "Build for Mac",
-  "queue.busy": "Another build was running.",
   "queue.cancel": "Cancel the rest",
   "queue.cancelled": "Cancelled",
   "queue.clear": "Clear",
