@@ -106,7 +106,7 @@ import NXModel
             stores.deviceStore.exportIPA = true
             stores.deviceStore.sendWhere = SendWhere.drive
             build.send = .copying(done: 1, total: 2)
-            wait(in: host, for: [build.t("dev.section")])
+            wait(in: host, for: [build.t("shared.buildKind")])
         }
     }
 

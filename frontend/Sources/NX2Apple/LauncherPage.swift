@@ -2,11 +2,12 @@ import SwiftUI
 import NXCore
 
 enum LauncherPage: String, CaseIterable {
-    case library, builds, settings
+    case library, builds, iphone, settings
     var symbol: String {
         switch self {
         case .library: return "gamecontroller"
         case .builds: return "shippingbox"
+        case .iphone: return "iphone"
         case .settings: return "slider.horizontal.3"
         }
     }
@@ -19,7 +20,7 @@ enum LibraryFilter: String, CaseIterable, Identifiable {
     var labelKey: String { "filter." + rawValue }
 
     /// Owned shows every game without reading its build, so the default filter costs nothing per card.
-    func includes(_ game: LibraryGame) -> Bool { self == .owned || game.isReady || game.hasIOSBuild }
+    func includes(_ game: LibraryGame) -> Bool { self == .owned || game.isReady || game.hasIOSBuild || game.addedToSharedApp }
 
     /// Use Finder-style ordering on the display title. Different games can have the same title.
     func visibleGames(_ games: [LibraryGame], matching search: String = "") -> [LibraryGame] {

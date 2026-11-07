@@ -36,6 +36,34 @@ extension GameLibrary {
         applySharedIPA(ipa, titles: Set(ShellLibrary.load(root: shellRoot).games.map { $0.titleID.uppercased() }), keepRecorded: false)
     }
 
+    /// A game build added the game to the shared app: it waits for the iPhone app page to make the app. Its archive is the game data
+    /// that goes over after an install or export.
+    func recordAddedToSharedApp(archive: String, commit: String = "", for id: UUID) {
+        guard var game = games.first(where: { $0.id == id }) else { return }
+        if !archive.isEmpty { game.archivePath = archive }
+        game.toolsCommit = commit
+        game.addedToSharedApp = true
+        upsert(game)
+    }
+
+    /// The iPhone app page exported the shared app: every game in shell.json is in that IPA.
+    func recordSharedExport(_ ipa: String, shellRoot: String) {
+        guard FileManager.default.fileExists(atPath: ipa) else { return }
+        applySharedIPA(ipa, titles: Set(ShellLibrary.load(root: shellRoot).games.map { $0.titleID.uppercased() }), keepRecorded: false)
+    }
+
+    /// A game taken out of the shared app: it no longer waits for it, and the shared app's IPA or install is no longer its status.
+    func recordRemovedFromSharedApp(titleID: String) {
+        updateGames { game in
+            guard game.titleID.caseInsensitiveCompare(titleID) == .orderedSame,
+                  game.addedToSharedApp || game.ipaKind == IPAKind.shared.rawValue || game.hasSharedApp else { return false }
+            game.addedToSharedApp = false
+            if game.ipaKind == IPAKind.shared.rawValue { game.ipaPath = ""; game.ipaKind = "" }
+            if game.hasSharedApp { game.iosAppPath = ""; game.installedDevice = "" }
+            return true
+        }
+    }
+
     /// The shared app's IPA from an export the library did not record (one made before the launcher recorded exports): the games in
     /// shell.json are in it when the IPA is newer than shell.json, which every export writes first and an install writes again. A game
     /// with an exported IPA of its own or an installed shared app keeps it.
@@ -53,10 +81,11 @@ extension GameLibrary {
     private func applySharedIPA(_ ipa: String, titles: Set<String>, keepRecorded: Bool) {
         guard !titles.isEmpty else { return }
         updateGames { game in
-            guard titles.contains(game.titleID.uppercased()), !game.hasSharedApp, !(keepRecorded && game.hasExportedIPA),
-                  game.ipaPath != ipa || game.ipaKind != IPAKind.shared.rawValue else { return false }
+            guard titles.contains(game.titleID.uppercased()), !(keepRecorded && (game.hasSharedApp || game.hasExportedIPA)) else { return false }
+            guard game.ipaPath != ipa || game.ipaKind != IPAKind.shared.rawValue || game.addedToSharedApp else { return false }
             game.ipaPath = ipa
             game.ipaKind = IPAKind.shared.rawValue
+            game.addedToSharedApp = false
             return true
         }
     }
@@ -73,9 +102,10 @@ extension GameLibrary {
         guard !device.isEmpty, !titles.isEmpty else { return }
         updateGames { game in
             guard titles.contains(game.titleID.uppercased()),
-                  game.iosAppPath != app || game.installedDevice != device || !game.ipaPath.isEmpty else { return false }
+                  game.iosAppPath != app || game.installedDevice != device || !game.ipaPath.isEmpty || game.addedToSharedApp else { return false }
             game.ipaPath = ""
             game.ipaKind = ""
+            game.addedToSharedApp = false
             game.iosAppPath = app
             game.installedDevice = device
             return true

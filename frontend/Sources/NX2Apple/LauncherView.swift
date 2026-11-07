@@ -25,6 +25,9 @@ struct LauncherView: View {
     @State var artwork: [UUID: NSImage] = [:]   // card size
     @State var heroArtwork: (id: UUID, image: NSImage)?   // the hero game's, at the size the hero needs
     @State var activeBuildID: UUID?
+    @StateObject var queue = BuildQueue()   // the games the library sent to build one after another (LauncherView+Queue.swift)
+    @State var picked: Set<UUID> = []   // the games selected for a batch build
+    @State var selecting = false   // the collection's Select mode: a click picks a game instead of showing it
     @State var launching = false
     @State private var launchError: String?
     @State private var removing: LibraryGame?
@@ -174,8 +177,11 @@ struct LauncherView: View {
                             .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
                     }
                 }
+            } else if page == .iphone {
+                SharedAppPage(build: m, devices: devices, library: library, onNewBuild: newBuild, onViewGame: { page = .library })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                CardPages(settings: page == .settings, build: m, updates: updates, repo: repo, engine: engine, dependencies: stores.dependencies, devices: devices,
+                CardPages(settings: page == .settings, queue: queue, onOpenSharedApp: { page = .iphone }, build: m, updates: updates, repo: repo, engine: engine, dependencies: stores.dependencies, devices: devices,
                           library: library, diagnostics: stores.diagnostics, onViewGame: { page = .library }, onOpenSettings: { page = .settings },
                           onChooseLibraryFolder: chooseLibraryFolder, onOpenControls: { controlsOpen = true }, onOpenControllers: { controllerSheet = true }, onRunSetup: onRunSetup, controlChanges: controls.changeCount,
                           padMerge: Binding(get: { controls.padMerge }, set: { setPadMerge($0) }))
@@ -203,6 +209,7 @@ struct LauncherView: View {
         .frame(minWidth: 900, idealWidth: 1280, minHeight: 680, idealHeight: 900)
         .onAppear {
             gamepad.perform = padAction
+            queue.start = startQueued
             gamepad.capture = { [consoleDriver] id, action in consoleDriver.consumePress(controllerID: id, isBack: action == .b) }
             if performStartupChecks {
                 library.migrateLaunchOptions(); library.migrateArtwork(); CloudSavesMigration.run()
@@ -249,7 +256,7 @@ struct LauncherView: View {
         .onChange(of: buildProgress) { progress in if m.running { DockProgress.update(progress) } }
         .onReceive(m.$running.removeDuplicates()) { running in
             if !running { DockProgress.update(nil) }
-            if running && activeBuildID == nil { activeBuildID = library.rememberInputs(m) }
+            if running && activeBuildID == nil && m.sharedJob == nil { activeBuildID = library.rememberInputs(m) }
             if running && activeBuildID != nil {   // the tools this build runs: a pull waits for the build (RepoStore.pull, autoPull)
                 buildCommit = ""
                 let dir = repo.path
@@ -262,11 +269,14 @@ struct LauncherView: View {
                 DispatchQueue.main.async {
                     guard !m.running else { return }   // a build may have started since the idle notification
                     if m.done { recordBuild() }
+                    let queued = m.sharedJob == nil
                     activeBuildID = nil
+                    if queued { DispatchQueue.main.async { queue.buildEnded(ok: m.done, note: m.doneNote) } }
                     engine.applyPendingEngine()   // an engine installed during the build takes over once it is recorded
                 }
             }
         }
+        .onChange(of: m.staleFrameworks.isEmpty) { empty in if empty { staleAnswered() } }   // LauncherView+Queue.swift
         .onReceive(m.$done.removeDuplicates()) { done in
             if done { DispatchQueue.main.async { recordBuild() } }
         }
@@ -697,7 +707,7 @@ struct LauncherView: View {
     }
 
     /// The installed apps' profile expiries, read in the background: `security cms` per unique app path, so not in a view body.
-    private func readSignatures() {
+    func readSignatures() {
         let apps = library.games.filter(\.onDevice).map { ($0.id, $0.iosAppPath) }
         guard !apps.isEmpty else { signatureExpiry = [:]; return }
         let runner = stores.runner
@@ -719,12 +729,13 @@ struct LauncherView: View {
     }
 
     private func recordBuild() {
+        if m.done, let job = m.sharedJob { recordSharedJob(job); return }   // the iPhone app page (LauncherView+SharedApp.swift)
         guard m.done, let id = activeBuildID else { return }
         if m.target == BuildTarget.mac { library.recordCompletedApp(path: m.macAppPath, commit: buildCommit, for: id) }
-        else if m.exportsShell {
-            // An export installs nothing: the IPA is what the build made (the shared app's, or the game's own)
-            library.recordExportedIPA(m.exportedIPAPath, kind: m.exportsOneGame ? .oneGame : .shared, archive: m.archivePath,
-                                      shellRoot: m.exportsOneGame ? "" : m.shellRoot, commit: buildCommit, for: id)
+        else if m.exportsOneGame {
+            library.recordExportedIPA(m.exportedIPAPath, kind: .oneGame, archive: m.archivePath, commit: buildCommit, for: id)
+        } else if m.addedToSharedApp {
+            library.recordAddedToSharedApp(archive: m.archivePath, commit: buildCommit, for: id)
         } else {
             library.recordCompletedIOS(archive: m.archivePath, app: m.installedAppPath, device: m.installedOn, commit: buildCommit, for: id)
             readSignatures()

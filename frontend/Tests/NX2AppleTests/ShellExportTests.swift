@@ -943,7 +943,7 @@ import NXModel
         stores.deviceStore.installDevice = ""
         stores.deviceStore.signingTeam = ""
         stores.deviceStore.exportIPA = true
-        XCTAssertTrue(model.exportsShell)
+        XCTAssertTrue(model.addsToSharedApp)
         XCTAssertFalse(model.installsDirectly)
         try write(f.repo + "/dm/tools/nx_extract/Program.cs", "")
         for tool in RepoLayout.requiredTools.filter({ $0 != RepoLayout.buildScript }) { try write(f.repo + "/" + tool, "") }
@@ -963,16 +963,33 @@ import NXModel
         try Data([0]).write(to: base); try Data().write(to: keys)
         model.slots[0].paths = [base.path]; model.slots[3].paths = [keys.path]
 
-        let finished = expectation(description: "Exported")
-        let token = model.$done.filter { $0 }.prefix(1).sink { _ in finished.fulfill() }
+        // The game build only adds the game to the shared app: no IPA, no device
+        let added = expectation(description: "Added")
+        let addedToken = model.$done.filter { $0 }.prefix(1).sink { _ in added.fulfill() }
         model.startBuild()
-        wait(for: [finished], timeout: 30)
-        withExtendedLifetime(token) {}
+        wait(for: [added], timeout: 30)
+        withExtendedLifetime(addedToken) {}
 
         let script = try String(contentsOfFile: state + "/script.txt")
         XCTAssertEqual(try String(contentsOfFile: state + "/build-env.txt"), "DM_PROF_TEX_BC_CPU=1\n")
         XCTAssertTrue(script.contains("--shell-framework \(temporary.path)/out/\(titleID)_build/shell-framework"), script)
         XCTAssertFalse(script.contains("--team-id"), script)
+        XCTAssertTrue(model.addedToSharedApp)
+        XCTAssertEqual(model.exportedIPAPath, "")
+        XCTAssertFalse(fm.fileExists(atPath: ShellInstall.ipaPath(root: f.root)), "a game build makes no IPA")
+        XCTAssertEqual(ShellLibrary.load(root: f.root).games.map(\.titleID), [titleID])
+        XCTAssertEqual(model.sharedApp.games.map(\.titleID), [titleID])
+        XCTAssertTrue(model.sharedApp.isNew(model.sharedApp.games[0], export: true), "not in an IPA yet")
+
+        // The iPhone app page exports the shared app with the games in it
+        model.done = false
+        let finished = expectation(description: "Exported")
+        let token = model.$done.filter { $0 }.prefix(1).sink { _ in finished.fulfill() }
+        model.makeSharedApp(data: [])
+        wait(for: [finished], timeout: 30)
+        withExtendedLifetime(token) {}
+        XCTAssertEqual(model.sharedJob, .export)
+        XCTAssertFalse(model.sharedApp.isNew(model.sharedApp.games[0], export: true), "in the IPA now")
         XCTAssertEqual(model.exportedIPAPath, ShellInstall.ipaPath(root: f.root))
         XCTAssertTrue(fm.fileExists(atPath: model.exportedIPAPath))
         XCTAssertEqual(model.installedOn, "")
@@ -1036,7 +1053,7 @@ import NXModel
         XCTAssertEqual(model.archivePath, "", "the game data is inside the IPA, nothing is packed beside it")
     }
 
-    func testOneGameChoiceIsOffAtFirstSavedAndOnlyCountsForAnExport() throws {
+    func testOneGameChoiceIsOffAtFirstAndSaved() throws {
         testDefaults.removeObject(forKey: DeviceStore.oneGameKey)
         let stores = LauncherStores(defaults: testDefaults); let model = stores.build
         XCTAssertFalse(stores.deviceStore.exportOneGame, "the shared app stays the default")
@@ -1044,7 +1061,8 @@ import NXModel
         stores.deviceStore.exportOneGame = true
         XCTAssertTrue(testDefaults.bool(forKey: DeviceStore.oneGameKey))
         stores.deviceStore.exportIPA = false
-        XCTAssertFalse(model.exportsOneGame, "installing on a device is always the shared app")
+        XCTAssertTrue(model.exportsOneGame, "the iPhone app page's switch does not change what a game build makes")
+        XCTAssertFalse(model.addsToSharedApp)
         stores.deviceStore.exportIPA = true
         XCTAssertTrue(model.exportsOneGame)
         model.target = BuildTarget.mac
@@ -1053,8 +1071,8 @@ import NXModel
         XCTAssertEqual(OneGameIPA.path(folder: "/O", titleID: "0100"), "/O/0100.ipa")
     }
 
-    /// The choice is saved and a build without it still asks for a device and a team.
-    @MainActor func testTheChoiceIsSavedAndWithoutItTheDeviceIsStillNeeded() throws {
+    /// The page's install or export choice is saved, and a game build adds to the shared app either way.
+    @MainActor func testTheChoiceIsSavedAndAGameBuildAddsToTheSharedAppEitherWay() throws {
         let stores = LauncherStores(defaults: testDefaults); let model = stores.build
         stores.repo.path = temporary.path
         try write(temporary.path + "/dm/tools/nx_extract/Program.cs", "")
@@ -1064,12 +1082,10 @@ import NXModel
         XCTAssertTrue(testDefaults.bool(forKey: DeviceStore.exportKey))
         stores.deviceStore.exportIPA = false
         XCTAssertFalse(testDefaults.bool(forKey: DeviceStore.exportKey))
-        XCTAssertFalse(model.exportsShell)
-        model.startBuild()
-        XCTAssertEqual(model.doneNote, model.t("shell.needsDevice"))
-        // the Mac app is never an export
-        stores.deviceStore.exportIPA = true
+        XCTAssertTrue(model.addsToSharedApp, "a game build adds to the shared app whatever the page's switch says")
+        XCTAssertFalse(model.canMakeSharedApp, "the page's install needs a device and a team")
+        // the Mac app is never in the shared app
         model.target = BuildTarget.mac
-        XCTAssertFalse(model.exportsShell)
+        XCTAssertFalse(model.addsToSharedApp)
     }
 }

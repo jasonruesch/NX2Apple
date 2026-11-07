@@ -14,6 +14,9 @@ struct LibraryGame: Codable, Identifiable, Equatable {
     /// What `ipaPath` is when the launcher made it by exporting: the shared app (`IPAKind.shared`) or the game's own IPA with its data
     /// inside (`IPAKind.oneGame`). Empty for an IPA from before the shared app, which `isOlderIOSBuild` then names.
     var ipaKind = ""
+    /// A game build added the game to the shared app, and the shared app was not installed or exported since: the iPhone app page
+    /// makes it.
+    var addedToSharedApp = false
     var archivePath = ""
     var lastTarget = BuildTarget.ios
     var inputs: [String: [String]] = [:]
@@ -58,6 +61,7 @@ struct LibraryGame: Codable, Identifiable, Equatable {
     /// The status line's text key: the Mac app first, then the shared app, then an exported IPA, then an older iPhone build.
     var statusKey: String {
         if isReady { return "library.ready" }
+        if addedToSharedApp { return "library.inSharedApp" }
         if hasSharedApp { return "library.readyIOS" }
         if hasExportedIPA { return "library.exportedIPA" }
         if hasIOSBuild { return "library.olderIOS" }
@@ -96,6 +100,7 @@ extension LibraryGame {
         mods = try c.decodeIfPresent([String].self, forKey: .mods) ?? []
         iosAppPath = try c.decodeIfPresent(String.self, forKey: .iosAppPath) ?? ""
         ipaKind = try c.decodeIfPresent(String.self, forKey: .ipaKind) ?? ""
+        addedToSharedApp = try c.decodeIfPresent(Bool.self, forKey: .addedToSharedApp) ?? false
         installedDevice = try c.decodeIfPresent(String.self, forKey: .installedDevice) ?? ""
         toolsCommit = try c.decodeIfPresent(String.self, forKey: .toolsCommit) ?? ""
     }

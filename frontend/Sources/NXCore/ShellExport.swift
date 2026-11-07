@@ -51,30 +51,45 @@ extension ShellInstaller {
     /// Exactly one of `failure` and (`library`, `env`) is set. `notes` name the games left out because their framework is incomplete.
     func prepareShell(framework: String, titleID: String, name: String)
         -> (library: ShellLibrary?, env: [String: String]?, failure: Outcome?, notes: [String]) {
-        // 3: the library
+        prepareShell(adding: .init(titleID: titleID, name: name, framework: framework))
+    }
+
+    /// Step 3 on its own: the library in shell.json with `game` added (nil: the games it holds already), the frameworks mirrored,
+    /// the incomplete ones left out and every game's banner in place. Exactly one of `library` and `failure` is set.
+    func updateLibrary(adding game: ShellLibrary.Game?) -> (library: ShellLibrary?, failure: String?, notes: [String]) {
         ShellInstall.sweepDiscarded(in: ShellInstall.frameworksMirror(root: root))
         var library = ShellLibrary.load(root: root)
         if !team.isEmpty { library.team = team }   // the export has no team: keep the one an install stored
-        library.add(.init(titleID: titleID, name: name, framework: framework))
+        if let game { library.add(game) }
         mirrorFrameworks(&library)
         library.dropMissing()
-        let checked = leaveOutIncomplete(&library, titleID: titleID, name: name)   // ShellFrameworks.swift
-        if let why = checked.failure {
-            let projectName = t("shell.projectStage")
+        let checked = leaveOutIncomplete(&library, titleID: game?.titleID ?? "", name: game?.name ?? "")   // ShellFrameworks.swift
+        if let why = checked.failure { return (nil, why, []) }
+        // The 16:9 banner of the shell's library for every game in it (ShellHost reads <framework>/banner.<ext>, the square
+        // icon.png is the fallback): a game rebuilt since its last install gets its banner back too
+        for entry in library.games {
+            let picked = entry.titleID == game?.titleID ? pickedArtwork : nil
+            if let banner = ShellInstall.placeBanner(titleID: entry.titleID, framework: entry.framework, banners: banners, picked: picked) {
+                log("banner: \(entry.titleID) \(banner)\n")
+            }
+        }
+        do { try library.save(root: root) } catch { return (nil, error.localizedDescription, []) }
+        return (library, nil, checked.notes)
+    }
+
+    /// Steps 3 and 4 with `game` added to the library, or with the games it holds when `game` is nil (the shared app page).
+    func prepareShell(adding game: ShellLibrary.Game?)
+        -> (library: ShellLibrary?, env: [String: String]?, failure: Outcome?, notes: [String]) {
+        // 3: the library
+        let updated = updateLibrary(adding: game)
+        guard let library = updated.library else {
+            let projectName = t("shell.projectStage"), why = updated.failure ?? ""
             begin(Self.projectStageID, projectName)
             end(Self.projectStageID, projectName, ok: false, detail: why)
             return (nil, nil, Outcome(ok: false, message: fmt("shell.projectFailed", why)), [])
         }
-        // The 16:9 banner of the shell's library for every game in it (ShellHost reads <framework>/banner.<ext>, the square
-        // icon.png is the fallback): a game rebuilt since its last install gets its banner back too
-        for game in library.games {
-            let picked = game.titleID == titleID ? pickedArtwork : nil
-            if let banner = ShellInstall.placeBanner(titleID: game.titleID, framework: game.framework, banners: banners, picked: picked) {
-                log("banner: \(game.titleID) \(banner)\n")
-            }
-        }
-        do { try library.save(root: root) } catch {
-            return (nil, nil, Outcome(ok: false, message: fmt("shell.projectFailed", error.localizedDescription)), [])
+        guard !library.games.isEmpty else {
+            return (nil, nil, Outcome(ok: false, message: t("shared.empty")), [])
         }
 
         // 4: the project
@@ -95,14 +110,21 @@ extension ShellInstaller {
             return (nil, nil, Outcome(ok: false, message: fmt("shell.projectFailed", why)), [])
         }
         end(Self.projectStageID, projectName, ok: true)
-        return (library, env, nil, checked.notes)
+        return (library, env, nil, updated.notes)
     }
 
     /// The export: the library and the project, the unsigned build, the entitlements, the IPA. Needs no device and no team.
     package func export(framework: String, titleID: String, name: String) -> Outcome {
+        guard FileManager.default.fileExists(atPath: framework) else { return missingFramework(framework, name: name) }
+        return export(adding: .init(titleID: titleID, name: name, framework: framework))
+    }
+
+    /// The export of the games the shared app holds, without adding one (the shared app page).
+    package func exportShared() -> Outcome { export(adding: nil) }
+
+    private func export(adding game: ShellLibrary.Game?) -> Outcome {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: framework) else { return missingFramework(framework, name: name) }
-        let prepared = prepareShell(framework: framework, titleID: titleID, name: name)
+        let prepared = prepareShell(adding: game)
         guard let library = prepared.library else { return prepared.failure! }
 
         // The unsigned build, in the export's own derived data

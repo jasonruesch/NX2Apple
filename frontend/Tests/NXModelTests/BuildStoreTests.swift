@@ -91,30 +91,35 @@ import XCTest
         XCTAssertFalse(store.canBuild, "a build runs")
     }
 
-    /// #416: the export choice is not an install, so the stop for a missing device and team does not apply to it.
-    func testTheExportChoiceNeedsNoDeviceAndNoTeam() {
+    /// A game build for iPhone or iPad only adds the game to the shared app: it needs no device and no team. The iPhone app page
+    /// installs the shared app, and that needs both.
+    func testAnIPhoneGameBuildNeedsNoDeviceAndNoTeam() {
         let store = makeStore()
         store.target = "ios"
-        devices.exportIPA = true
-        XCTAssertTrue(store.exportsShell)
-        XCTAssertFalse(store.installsDirectly)
+        XCTAssertTrue(store.addsToSharedApp)
+        XCTAssertFalse(store.exportsOneGame)
         store.startBuild()
         XCTAssertNotEqual(store.doneNote, store.t("shell.needsDevice"))
+        devices.exportOneGame = true
+        XCTAssertFalse(store.addsToSharedApp, "one game's own IPA is not the shared app")
+        XCTAssertTrue(store.exportsOneGame)
         store.target = BuildTarget.mac
-        XCTAssertFalse(store.exportsShell, "a Mac app is never an IPA")
+        XCTAssertFalse(store.addsToSharedApp, "a Mac app is never in the shared app")
+        XCTAssertFalse(store.exportsOneGame, "a Mac app is never an IPA")
     }
 
-    func testAnIPhoneBuildWithoutADeviceStopsBeforeTheLongSteps() {
+    func testTheSharedAppInstallNeedsADeviceAndATeamAndTheExportNeither() {
         let store = makeStore()
-        store.target = "ios"
-        store.startBuild()
-        XCTAssertFalse(store.running)
-        XCTAssertEqual(store.doneNote, store.t("shell.needsDevice"))
         XCTAssertFalse(store.installsDirectly)
+        XCTAssertFalse(store.canMakeSharedApp)
         devices.installDevice = "UDID"; devices.signingTeam = "TEAM"
         XCTAssertTrue(store.installsDirectly)
-        store.target = "mac-app"
-        XCTAssertFalse(store.installsDirectly, "a Mac app is not installed on a device")
+        XCTAssertTrue(store.canMakeSharedApp)
+        devices.installDevice = ""
+        devices.exportIPA = true
+        XCTAssertTrue(store.canMakeSharedApp, "an export needs no device")
+        store.running = true
+        XCTAssertFalse(store.canMakeSharedApp, "a build runs")
     }
 
     func testABuildWithoutARepositoryEndsWithTheMessageAndRunsNothing() {

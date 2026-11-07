@@ -98,7 +98,7 @@ import NXModel
         window.setContentSize(NSSize(width: 900, height: 680))
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         let targets = try XCTUnwrap(pad.frames["main"])
-        for id in ["tab.library", "tab.builds", "tab.settings", "top.build"] {
+        for id in ["tab.library", "tab.builds", "tab.iphone", "tab.settings", "top.build"] {
             let frame = try XCTUnwrap(targets.first { $0.id == id }?.frame, id)
             let wide = try XCTUnwrap(singleLine.first { $0.id == id }?.frame, id)
             XCTAssertLessThanOrEqual(frame.height, wide.height + 1, "The top bar should fit a single line: " + id)
@@ -106,6 +106,8 @@ import NXModel
         pad.show(default: "tab.library")
         pad.horizontal(1)
         XCTAssertEqual(pad.focused, "tab.builds")
+        pad.horizontal(1)
+        XCTAssertEqual(pad.focused, "tab.iphone")
         pad.horizontal(1)
         XCTAssertEqual(pad.focused, "tab.settings")
     }
@@ -980,6 +982,31 @@ import NXModel
         try capture("build", page: .builds)
         try capture("build-small", width: 900, height: 680, page: .builds)
         try capture("settings", page: .settings)
+        do {   // the iPhone app page with two games, one built since the last export, and the Builds page for an iPhone game
+            let root = temporary.appendingPathComponent("iphone-shell").path
+            let previous = testDefaults.string(forKey: "shellRoot")
+            defer { testDefaults.set(previous, forKey: "shellRoot"); model.target = BuildTarget.mac }
+            testDefaults.set(root, forKey: "shellRoot")
+            var shell = ShellLibrary()
+            for (tid, name) in [(titleID, "Hades"), ("010093801237C000", "Metroid Dread")] {
+                let framework = root + "/frameworks/DmGame\(tid).framework"
+                try FileManager.default.createDirectory(atPath: framework, withIntermediateDirectories: true)
+                shell.add(.init(titleID: tid, name: name, framework: framework))
+            }
+            try shell.save(root: root)
+            let ipa = ShellInstall.ipaPath(root: root)
+            try FileManager.default.createDirectory(atPath: (ipa as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try Data([0]).write(to: URL(fileURLWithPath: ipa))
+            let hour = Date().addingTimeInterval(-3600)
+            try FileManager.default.setAttributes([.modificationDate: hour.addingTimeInterval(-60)], ofItemAtPath: shell.games[0].framework)
+            try FileManager.default.setAttributes([.modificationDate: hour], ofItemAtPath: ipa)
+            modelStores.deviceStore.exportIPA = true
+            try capture("iphone-app", height: 1400, page: .iphone)
+            modelStores.deviceStore.exportIPA = false
+            try capture("iphone-app-install", page: .iphone)
+            model.target = BuildTarget.ios
+            try capture("build-ios", height: 1400, page: .builds)
+        }
         do {   // a game built for iPhone and exported as the shared app's IPA: the hero says so instead of "Not built yet"
             let copy = temporary.appendingPathComponent("exported.json")
             try? FileManager.default.removeItem(at: copy)

@@ -169,6 +169,9 @@ extension LauncherView {
             HStack(spacing: 16) {
                 Text(loc.t("library.collection")).font(.manrope(28, .bold)).tracking(-0.6)
                 Spacer()
+                Button(loc.t(selecting ? "queue.selectDone" : "queue.select")) { selecting.toggle(); if !selecting { picked = [] } }
+                    .buttonStyle(LauncherSecondaryButtonStyle())
+                    .help(loc.t("queue.selectHelp"))
                 LauncherSegmented(options: LibraryFilter.allCases.map { ($0.rawValue, loc.t($0.labelKey)) },
                                   selection: libraryFilter.rawValue) { setLibraryFilter(LibraryFilter(rawValue: $0) ?? .owned) }
                     .frame(width: LauncherControl.width)
@@ -178,6 +181,7 @@ extension LauncherView {
                 Text(String(format: loc.t("library.gameCount"), libraryFilter == .owned ? library.games.count : library.games.filter(libraryFilter.includes).count))
                     .font(.manrope(12)).foregroundStyle(.secondary)
             }
+            selectionBar   // LauncherView+Queue.swift
             if games.isEmpty {
                 Text(loc.t("library.noResults")).foregroundStyle(.secondary).padding(.vertical, 28)
             } else {
@@ -186,7 +190,7 @@ extension LauncherView {
                         HStack(alignment: .top, spacing: 14) {
                             ForEach(games) { game in
                                 let _ = LauncherWork.count(.card)
-                                Button { library.selectedID = game.id } label: {
+                                Button { cardClicked(game) } label: {
                                     VStack(alignment: .leading, spacing: 8) {
                                         ZStack {
                                             if let image = artwork[game.id] {
@@ -199,7 +203,15 @@ extension LauncherView {
                                         .frame(width: cardWidth, height: cardWidth / 1.8).clipped()
                                         .clipShape(RoundedRectangle(cornerRadius: 5))
                                         .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(
-                                            game.id == heroID ? LauncherPalette.cream : .clear, lineWidth: 2))
+                                            picked.contains(game.id) ? LauncherPalette.ready : (game.id == heroID ? LauncherPalette.cream : .clear), lineWidth: 2))
+                                        .overlay(alignment: .topLeading) {
+                                            if selecting || picked.contains(game.id) {
+                                                Image(systemName: picked.contains(game.id) ? "checkmark.circle.fill" : "circle")
+                                                    .font(.system(size: 20, weight: .semibold))
+                                                    .foregroundStyle(picked.contains(game.id) ? LauncherPalette.ready : .white, .black.opacity(0.4))
+                                                    .padding(8)
+                                            }
+                                        }
                                         Text(game.name).font(.manrope(16, .semibold)).lineLimit(1)
                                         status(game)
                                         Capsule().fill(game.id == heroID ? LauncherPalette.cream : .clear)
@@ -208,7 +220,7 @@ extension LauncherView {
                                     .frame(width: cardWidth, alignment: .leading).contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityAddTraits(game.id == heroID ? .isSelected : [])
+                                .accessibilityAddTraits(game.id == heroID || picked.contains(game.id) ? .isSelected : [])
                                 .padTarget("card." + game.id.uuidString, scope: "main", radius: 7) { if !launching { primaryAction(game) } }
                             }
                         }
@@ -256,7 +268,7 @@ extension LauncherView {
 
     func status(_ game: LibraryGame, prominent: Bool = false) -> some View {
         let building = m.running && activeBuildID == game.id
-        let color = building ? LauncherPalette.building : ((game.isReady || game.hasIOSBuild) ? LauncherPalette.ready : LauncherPalette.unbuilt)
+        let color = building ? LauncherPalette.building : ((game.isReady || game.hasIOSBuild || game.addedToSharedApp) ? LauncherPalette.ready : LauncherPalette.unbuilt)
         let key = building ? "library.building" : game.statusKey
         return HStack(spacing: 7) {
             Circle().fill(color).frame(width: prominent ? 9 : 7, height: prominent ? 9 : 7)

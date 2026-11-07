@@ -181,6 +181,40 @@ final class BuildTargetTests: IsolatedDefaultsTestCase {
         GameLibrary(file: file).syncExportedIPA(root: temporary.appendingPathComponent("no-shell").path)   // no shell folder: nothing happens
     }
 
+    /// A game build adds the game to the shared app; the page's install or export then lists it there, and removing it forgets both.
+    func testAGameAddedToTheSharedAppWaitsUntilThePageMakesIt() throws {
+        let file = temporary.appendingPathComponent("library.json")
+        let root = temporary.appendingPathComponent("shell").path
+        var shell = ShellLibrary()
+        let framework = try app(named: "DmGame0100535012974000.framework", at: "frameworks")
+        shell.add(.init(titleID: "0100535012974000", name: "Hades", framework: framework.path))
+        try shell.save(root: root)
+        let game = LibraryGame(titleID: "0100535012974000", name: "Hades")
+        try JSONEncoder().encode([game]).write(to: file)
+        let library = GameLibrary(file: file)
+
+        library.recordAddedToSharedApp(archive: "/games/Hades/0100535012974000", commit: "abc", for: game.id)
+        var stored = try XCTUnwrap(GameLibrary(file: file).games.first)
+        XCTAssertTrue(stored.addedToSharedApp)
+        XCTAssertEqual(stored.statusKey, "library.inSharedApp")
+        XCTAssertEqual(stored.archivePath, "/games/Hades/0100535012974000")
+        XCTAssertTrue(LibraryFilter.built.includes(stored))
+        XCTAssertFalse(stored.isOlderIOSBuild)
+
+        let ipa = ShellInstall.ipaPath(root: root)
+        try FileManager.default.createDirectory(atPath: (ipa as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try Data([0]).write(to: URL(fileURLWithPath: ipa))
+        library.recordSharedExport(ipa, shellRoot: root)
+        stored = try XCTUnwrap(GameLibrary(file: file).games.first)
+        XCTAssertFalse(stored.addedToSharedApp)
+        XCTAssertEqual(stored.statusKey, "library.exportedIPA")
+
+        library.recordRemovedFromSharedApp(titleID: "0100535012974000")
+        stored = try XCTUnwrap(GameLibrary(file: file).games.first)
+        XCTAssertEqual(stored.ipaPath, "")
+        XCTAssertEqual(stored.statusKey, "library.notBuilt")
+    }
+
     func testEveryLanguageNamesAnExportedIPA() {
         for lang in Lang.all { XCTAssertNotNil(L10n.catalogs[lang.code]?["library.exportedIPA"], lang.code) }
         XCTAssertEqual(L10n.string("library.exportedIPA", .en), "Exported as IPA")

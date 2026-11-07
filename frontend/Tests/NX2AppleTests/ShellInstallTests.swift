@@ -878,9 +878,9 @@ import NXModel
         XCTAssertEqual(installer(f).installData(titleID: titleID, archive: f.archive).message, "Installed on Z, the game data was already on the device")
     }
 
-    // ---- through the model: the build with the third target, and the re-sign ----
+    // ---- through the model: the game build, the iPhone app page's install, and the re-sign ----
 
-    @MainActor func testBuildWithTheShellTargetInstallsAndResignsTheSharedApp() throws {
+    @MainActor func testAGameBuildThenThePageInstallsAndResignsTheSharedApp() throws {
         let f = try fixtureWithRomFSTool()
         testDefaults.set(f.root, forKey: "shellRoot")
         let modelStores = LauncherStores(xcrun: f.xcrun, defaults: testDefaults); let model = modelStores.build
@@ -909,16 +909,29 @@ import NXModel
         model.slots[0].paths = [base.path]; model.slots[3].paths = [keys.path]
         try fm.removeItem(atPath: f.archive)   // the build's own archive step makes it
 
+        // The game build adds the game to the shared app: nothing is signed or installed yet
+        let added = expectation(description: "Added")
+        let addedToken = model.$done.filter { $0 }.prefix(1).sink { _ in added.fulfill() }
+        model.startBuild()
+        wait(for: [added], timeout: 30)
+        withExtendedLifetime(addedToken) {}
+        let script = try String(contentsOfFile: state + "/script.txt")
+        XCTAssertTrue(script.contains("--shell-framework \(temporary.path)/out/\(titleID)_build/shell-framework"), script)
+        XCTAssertFalse(script.contains("--team-id"), "the framework is signed when the page makes the shared app")
+        XCTAssertFalse(script.contains("--prepare-xcode"))
+        XCTAssertTrue(model.addedToSharedApp)
+        XCTAssertEqual(model.installedOn, "")
+        XCTAssertFalse(calls.contains { $0.hasPrefix("xcodebuild") }, "no shared app is made by a game build")
+
+        // The iPhone app page makes it and installs it, with the game data the build packed
+        model.done = false
         let finished = expectation(description: "Installed")
         let token = model.$done.filter { $0 }.prefix(1).sink { _ in finished.fulfill() }
         let asked = modelStores.deviceStore.$shellCopy.compactMap { $0 }.prefix(1).sink { _ in modelStores.deviceStore.answerCopy(.copy) }
-        model.startBuild()
+        model.makeSharedApp(data: [SharedGameData(titleID: titleID, archive: model.archivePath)])
         wait(for: [finished], timeout: 30)
         withExtendedLifetime(token) {}; withExtendedLifetime(asked) {}
-
-        let script = try String(contentsOfFile: state + "/script.txt")
-        XCTAssertTrue(script.contains("--shell-framework \(temporary.path)/out/\(titleID)_build/shell-framework --team-id \(team)"), script)
-        XCTAssertFalse(script.contains("--prepare-xcode"))
+        XCTAssertEqual(model.sharedJob, .install)
         XCTAssertEqual(model.installedOn, device)
         XCTAssertEqual(model.installedAppPath, f.root + "/derived-data/Build/Products/Release-iphoneos/DmShell.app")
         XCTAssertFalse(model.running)
@@ -962,20 +975,21 @@ import NXModel
         return modelStores
     }
 
-    /// An unknown device stops the build before the script runs: no hour of building for a device that cannot be installed on.
-    @MainActor func testUnknownDeviceStopsTheBuildBeforeTheScriptRuns() throws {
+    /// An unknown device stops the page's install before anything is signed, with the pairing steps.
+    @MainActor func testUnknownDeviceStopsTheSharedAppInstallBeforeSigning() throws {
         let f = try makeFixture()
+        testDefaults.set(f.root, forKey: "shellRoot")
         try writeDevices(state + "/devices-default.json", [("00008150-OTHER", "wired")])
         let modelStores = try makeModel(f)
         let model = modelStores.build
-        model.startBuild()
+        model.makeSharedApp(data: [])
         let stopped = expectation(description: "Checked")
         let token = model.$running.dropFirst().filter { !$0 }.prefix(1).sink { _ in stopped.fulfill() }
         wait(for: [stopped], timeout: 20)
         withExtendedLifetime(token) {}
         XCTAssertEqual(model.failure?.kind, .devicePairing)
         XCTAssertEqual(model.doneNote, String(format: model.t("shell.notPaired"), modelStores.deviceStore.deviceName(modelStores.deviceStore.installDevice)), "the pairing steps, in the app's language")
-        XCTAssertFalse(fm.fileExists(atPath: state + "/script.txt"), "the build script did not start")
+        XCTAssertFalse(calls.contains { $0.hasPrefix("xcodebuild") }, "nothing was signed")
     }
 
     /// The copy card's answer and the failure row: a copy that fails midway says the data is incomplete, and Retry runs only the data step.
@@ -1017,17 +1031,17 @@ import NXModel
         XCTAssertEqual(try String(contentsOfFile: container + "/org.nxnative.shell/Documents/games/\(titleID)/romfs.img"), "0123456789")
     }
 
-    @MainActor func testShellTargetWithoutDeviceStopsBeforeBuilding() throws {
+    /// The page's install needs a device and a team: without them it does not start.
+    @MainActor func testTheSharedAppInstallWithoutADeviceDoesNotStart() throws {
         let modelStores = LauncherStores(defaults: testDefaults); let model = modelStores.build
         modelStores.repo.path = temporary.path
-        try write(temporary.path + "/dm/tools/nx_extract/Program.cs", "")
-        model.target = "ios"
         modelStores.deviceStore.installDevice = ""
-        // "Export the IPA" is read from the shared preferences of the test process, so a value left there (a killed run, a run in
-        // another worktree at the same time) skipped the device check and the test saw the stale-tools note instead.
+        // "Export the IPA" is read from the shared preferences of the test process: set it, so a value left there cannot turn this
+        // into an export, which needs no device.
         modelStores.deviceStore.exportIPA = false
-        model.startBuild()
+        XCTAssertFalse(model.canMakeSharedApp)
+        model.makeSharedApp(data: [])
         XCTAssertFalse(model.running)
-        XCTAssertEqual(model.doneNote, model.t("shell.needsDevice"))
+        XCTAssertNil(model.sharedJob)
     }
 }

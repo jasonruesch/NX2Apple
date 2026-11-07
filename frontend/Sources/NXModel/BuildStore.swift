@@ -32,9 +32,9 @@ package struct FilePick: Equatable {
     /// The paired devices the last listing found.
     var devices: [AppleDevice] { get }
     var signingTeam: String { get }
-    /// The build exports the shared app as an IPA instead of installing it.
+    /// The iPhone app page exports the shared app as an IPA instead of installing it.
     var exportIPA: Bool { get }
-    /// The export makes one game's own IPA with its game data inside (#540).
+    /// An iPhone game build makes the game's own IPA with its game data inside (#540) instead of adding the game to the shared app.
     var exportOneGame: Bool { get }
     /// The folder the game data is copied to (a drive), empty when none is chosen.
     var driveFolder: String { get set }
@@ -164,6 +164,10 @@ func hop(_ body: @escaping @MainActor () -> Void) {
     @Published package var installedOn = ""       // the device the last build went to (its UDID)
     @Published package var installedAppPath = ""  // the signed app that went there
     @Published package var exportedIPAPath = ""   // the unsigned IPA of an export (#416)
+    /// The last game build added its game to the shared app (the build's outcome, read by the library).
+    @Published package var addedToSharedApp = false
+    /// What the iPhone app page runs, nil for a game build: the launcher records a game build only when this is nil.
+    @Published package var sharedJob: SharedJob?
     @Published package var send: DataSend = .idle {  // step 3 of the export: the game data on its way (BuildStore+Send.swift)
         didSet { if send != oldValue { finderShown = false } }
     }
@@ -244,12 +248,13 @@ func hop(_ body: @escaping @MainActor () -> Void) {
     package var lang: Lang { get { localizer.lang } set { localizer.lang = newValue } }
     package func t(_ key: String) -> String { localizer.t(key) }
 
-    /// This iPhone build goes straight to a device.
-    /// An iPhone or iPad build that makes the shared app as an unsigned IPA (#416): no device, no team.
-    package var exportsShell: Bool { target != BuildTarget.mac && devices.exportIPA }
+    /// An iPhone or iPad game build that adds the game to the shared app: no device, no team, nothing made but the game. The iPhone
+    /// app page makes the shared app (BuildStore+SharedApp.swift).
+    package var addsToSharedApp: Bool { target != BuildTarget.mac && !devices.exportOneGame }
     /// An export of one game's own IPA with the game data inside (#540): the engine's one-game app, no shared app, nothing to send.
-    package var exportsOneGame: Bool { exportsShell && devices.exportOneGame }
-    package var installsDirectly: Bool { target != BuildTarget.mac && !devices.installDevice.isEmpty && !devices.signingTeam.isEmpty }
+    package var exportsOneGame: Bool { target != BuildTarget.mac && devices.exportOneGame }
+    /// The shared app can go to a device: one is chosen, and a team to sign with.
+    package var installsDirectly: Bool { !devices.installDevice.isEmpty && !devices.signingTeam.isEmpty }
 
     /// Home shown as ~ (shorter in a one-line row, and it keeps the account name out of screenshots).
     package func shortPath(_ path: String) -> String { RepoLayout.shortPath(path) }

@@ -13,12 +13,7 @@ extension BuildStore {
 
     func runBuild() {
         guard !running else { return }
-        // The shared app needs a device this Mac knows. Found out here, before an hour of building, not after it.
-        if target != BuildTarget.mac, !shellDeviceChecked, !exportsShell {
-            guard installsDirectly else { doneNote = t("shell.needsDevice"); done = false; return }
-            verifyShellDevice()
-            return
-        }
+        // A game build needs no device: the iPhone app page installs the shared app, and checks the device then
         shellDeviceChecked = false
         if target != BuildTarget.mac, !exportsOneGame, !scriptFallback, askAboutStaleFrameworks() { return }   // StaleFrameworksPrompt.swift (#449)
         stopping = false
@@ -27,7 +22,7 @@ extension BuildStore {
         failure = nil; confirmingOverride = nil
         let overrideKind = armedOverride   // kept for the script's run after nxb's exit code 4, which is the same build
         let override = takeOverrideFlag()   // for this build only: the next one asks again
-        installedOn = ""; installedAppPath = ""; exportedIPAPath = ""; send = .idle
+        installedOn = ""; installedAppPath = ""; exportedIPAPath = ""; send = .idle; addedToSharedApp = false; sharedJob = nil
         guard repo.isRepo else {
             fail(repo.path.isEmpty ? t("msg.repoInvalidEmpty") : String(format: t("msg.repoInvalid"), shortPath(repo.path)))
             return
@@ -177,7 +172,7 @@ extension BuildStore {
             args += ["--platform", "mac-app", "-o", macOutput.builderURL.path]
         } else {
             // Only the game's framework: the one shared app is made and signed after the script (installShell)
-            args += ShellInstall.buildArguments(workDir: workDir, team: exportsShell ? "" : devices.signingTeam)
+            args += ShellInstall.buildArguments(workDir: workDir, team: "")
         }
         // The archive step packs whatever folder the build reported; without --work-dir that is the
         // script's default, which is the same workDir unless a separate output folder was chosen.
@@ -230,9 +225,9 @@ extension BuildStore {
                         let fw = ShellInstall.builtFramework(workDir: self.effectiveWorkDir)
                             ?? ShellInstall.frameworkPath(workDir: self.effectiveWorkDir, titleID: key)
                         let tid = ShellInstall.titleID(ofFramework: fw)
-                        self.packArchive(workDir: self.effectiveWorkDir, titleID: tid) {
-                            if self.exportsShell { self.exportShell(framework: fw, titleID: tid, name: name) }
-                            else { self.installShell(framework: fw, titleID: tid, name: name, archive: $0) }
+                        // The archive (its path is in archivePath) goes over from the iPhone app page, after the shared app is made
+                        self.packArchive(workDir: self.effectiveWorkDir, titleID: tid) { _ in
+                            self.addToSharedApp(framework: fw, titleID: tid, name: name)
                         }
                     }
                 } else if self.fallsBackToScript(status: status) {
@@ -290,25 +285,6 @@ extension BuildStore {
                 fail(app.path + "\n" + cause.localizedDescription)
             } catch {
                 fail(t("msg.macAppMissing"))
-            }
-        }
-    }
-
-    /// Looks the device up in `devicectl list devices` (in the background), then starts the build, or says how to pair it.
-    package func verifyShellDevice() {
-        running = true; done = false; doneNote = ""; failure = nil; stages = []
-        let xcrun = devices.xcrun, device = devices.installDevice, runner = runner
-        DispatchQueue.global(qos: .userInitiated).async {
-            let link = ShellInstall.connection(of: device, in: DeviceTools.devices(xcrun: xcrun, timeout: 20, runner: runner))
-            hop {
-                self.running = false
-                if link == .notPaired {
-                    self.failure = BuildFailure(kind: .devicePairing, gameName: nil)
-                    self.doneNote = String(format: self.t("shell.notPaired"), self.devices.deviceName(device))
-                    return
-                }
-                self.shellDeviceChecked = true
-                self.runBuild()
             }
         }
     }

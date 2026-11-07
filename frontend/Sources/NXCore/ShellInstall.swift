@@ -71,6 +71,11 @@ package struct ShellLibrary: Codable, Equatable {
         return Set(titles)
     }
 
+    /// When the shared app was last installed on a device (its receipt was written), nil before the first install.
+    package static func installedAt(root: String) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: receiptFile(root: root)))?[.modificationDate] as? Date
+    }
+
     /// The uppercased title IDs from the last successful device install that are still present in `shell.json`.
     package static func installedReceipt(root: String) -> Set<String> {
         let current = Set(load(root: root).games.map { $0.titleID.uppercased() })
@@ -516,10 +521,16 @@ package struct ShellInstaller {
         guard FileManager.default.fileExists(atPath: framework) else {
             return missingFramework(framework, name: name)
         }
+        return install(adding: .init(titleID: titleID, name: name, framework: framework), data: [.init(titleID: titleID, archive: archive)])
+    }
+
+    /// The install of the shared app with `game` added (nil: the games it holds, for the shared app page), then the game data of
+    /// each of `data` that the device lacks, in order. The first copy that does not end well is the outcome.
+    package func install(adding game: ShellLibrary.Game?, data: [SharedGameData]) -> Outcome {
         // A device this Mac never paired is found out now, not after the signing: nothing is built for it
         if let refused = pairingRefusal() { return refused }
         // 3 and 4: the library and the project
-        let prepared = prepareShell(framework: framework, titleID: titleID, name: name)
+        let prepared = prepareShell(adding: game)
         guard var library = prepared.library, let env = prepared.env else { return prepared.failure! }
         let projectName = t("shell.projectStage")
 
@@ -579,7 +590,11 @@ package struct ShellInstaller {
         // 7: the game data, only what the device does not have yet
         var outcome = Outcome(ok: true, message: fmt("dev.installed", deviceName), appPath: app, bundleID: bundleID)
         outcome.noMemoryCapability = noMemoryCapability
-        var result = copyGameData(titleID: titleID, archive: archive, app: app, bundleID: bundleID, outcome: outcome)
+        var result = outcome
+        for item in data where !item.archive.isEmpty {
+            result = copyGameData(titleID: item.titleID, archive: item.archive, app: app, bundleID: bundleID, outcome: outcome)
+            if !result.ok || result.copySkipped { break }
+        }
         if result.ok, !prepared.notes.isEmpty { result.message = ([result.message] + prepared.notes).joined(separator: "\n") }
         return result
     }

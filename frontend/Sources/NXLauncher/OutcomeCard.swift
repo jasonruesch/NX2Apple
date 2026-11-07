@@ -8,12 +8,14 @@ package struct OutcomeCard: View {
     @ObservedObject var build: BuildStore
     @ObservedObject var devices: DeviceStore
     let onViewGame: () -> Void
+    let onOpenSharedApp: () -> Void
     @EnvironmentObject var loc: Localizer
 
-    package init(build: BuildStore, devices: DeviceStore, onViewGame: @escaping () -> Void) {
+    package init(build: BuildStore, devices: DeviceStore, onViewGame: @escaping () -> Void, onOpenSharedApp: @escaping () -> Void = {}) {
         self.build = build
         self.devices = devices
         self.onViewGame = onViewGame
+        self.onOpenSharedApp = onOpenSharedApp
     }
 
     package var body: some View {
@@ -21,6 +23,14 @@ package struct OutcomeCard: View {
             CardGroup(loc.t("section.done")) {
                 CardRow(loc.t("library.ready"), detail: build.shortPath(build.macAppPath), dot: LauncherPalette.ready, help: build.macAppPath) {
                     Button(loc.t("install.reveal")) { revealInFinder(build.macAppPath) }
+                    Button(loc.t("build.showLibrary"), action: onViewGame)
+                }
+            }
+        }
+        if build.done && build.addedToSharedApp {
+            CardGroup(loc.t("section.done")) {
+                CardRow(loc.t("library.inSharedApp"), detail: loc.t("shared.addedNote"), dot: LauncherPalette.ready) {
+                    Button(loc.t("shared.open"), action: onOpenSharedApp)
                     Button(loc.t("build.showLibrary"), action: onViewGame)
                 }
             }
