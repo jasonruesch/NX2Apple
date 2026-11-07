@@ -1076,6 +1076,7 @@
   "library.clearSearch": "Suche löschen",
   "library.collection": "Deine Sammlung",
   "library.error": "Die Aktion konnte nicht abgeschlossen werden",
+  "library.exportedIPA": "Als IPA exportiert",
   "library.firstBuild": "Erstes Spiel bauen",
   "library.folderHint": "Hier finden wir fertige Spiele, und dieser Ordner dient auch für neue Builds.",
   "library.folderTitle": "Dein Spieleordner",

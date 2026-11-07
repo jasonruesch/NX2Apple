@@ -1094,6 +1094,7 @@
   "library.clearSearch": "検索をクリア",
   "library.collection": "コレクション",
   "library.error": "操作を完了できませんでした",
+  "library.exportedIPA": "IPA として書き出し済み",
   "library.firstBuild": "最初のゲームをビルド",
   "library.folderHint": "完成したゲームをここから探し、新しいビルドの保存先にもこのフォルダを使います。",
   "library.folderTitle": "ゲームフォルダ",

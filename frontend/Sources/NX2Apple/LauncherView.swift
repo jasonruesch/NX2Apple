@@ -206,7 +206,7 @@ struct LauncherView: View {
             gamepad.capture = { [consoleDriver] id, action in consoleDriver.consumePress(controllerID: id, isBack: action == .b) }
             if performStartupChecks {
                 library.migrateLaunchOptions(); library.migrateArtwork(); CloudSavesMigration.run()
-                library.syncSharedApp(root: m.shellCachePath)
+                library.syncSharedApp(root: m.shellCachePath); library.syncExportedIPA(root: m.shellCachePath)
             }
             if let slot = qaArtwork, artworkEditor == nil, let game = library.selected { openArtwork(game, slot: slot) }
             if qaManage.open {
@@ -232,13 +232,13 @@ struct LauncherView: View {
             DispatchQueue.main.async { BuildNotifier.shared.route = nil }
         }
         .onChange(of: library.games) { _ in
-            if performStartupChecks { library.syncSharedApp(root: m.shellCachePath) }
+            if performStartupChecks { library.syncSharedApp(root: m.shellCachePath); library.syncExportedIPA(root: m.shellCachePath) }
             refreshArtwork()
             readSignatures()
             if performStartupChecks { fetchArtwork() }
         }
         .onChange(of: m.shellCachePath) { root in
-            if performStartupChecks { library.syncSharedApp(root: root); readSignatures() }
+            if performStartupChecks { library.syncSharedApp(root: root); library.syncExportedIPA(root: root); readSignatures() }
         }
         .onChange(of: repo.path) { _ in refreshArtwork(); if performStartupChecks { checkTools() } }
         // A clone, pull or update check has finished (the automatic pull at launch among them): the checkout may have moved
@@ -721,7 +721,11 @@ struct LauncherView: View {
     private func recordBuild() {
         guard m.done, let id = activeBuildID else { return }
         if m.target == BuildTarget.mac { library.recordCompletedApp(path: m.macAppPath, commit: buildCommit, for: id) }
-        else {
+        else if m.exportsShell {
+            // An export installs nothing: the IPA is what the build made (the shared app's, or the game's own)
+            library.recordExportedIPA(m.exportedIPAPath, kind: m.exportsOneGame ? .oneGame : .shared, archive: m.archivePath,
+                                      shellRoot: m.exportsOneGame ? "" : m.shellRoot, commit: buildCommit, for: id)
+        } else {
             library.recordCompletedIOS(archive: m.archivePath, app: m.installedAppPath, device: m.installedOn, commit: buildCommit, for: id)
             readSignatures()
         }

@@ -1094,6 +1094,7 @@
   "library.clearSearch": "Clear search",
   "library.collection": "Your collection",
   "library.error": "Couldn’t complete the action",
+  "library.exportedIPA": "Exported as IPA",
   "library.firstBuild": "Build your first game",
   "library.folderHint": "We’ll find finished games here and use this folder for new builds, too.",
   "library.folderTitle": "Your games folder",

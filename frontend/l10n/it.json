@@ -1095,6 +1095,7 @@
   "library.clearSearch": "Cancella ricerca",
   "library.collection": "La tua collezione",
   "library.error": "Impossibile completare l’azione",
+  "library.exportedIPA": "Esportato come IPA",
   "library.firstBuild": "Compila il tuo primo gioco",
   "library.folderHint": "Qui cercheremo i giochi già compilati e salveremo le nuove build.",
   "library.folderTitle": "La tua cartella dei giochi",

@@ -11,6 +11,9 @@ struct LibraryGame: Codable, Identifiable, Equatable {
     var name: String
     var appPath = ""
     var ipaPath = ""
+    /// What `ipaPath` is when the launcher made it by exporting: the shared app (`IPAKind.shared`) or the game's own IPA with its data
+    /// inside (`IPAKind.oneGame`). Empty for an IPA from before the shared app, which `isOlderIOSBuild` then names.
+    var ipaKind = ""
     var archivePath = ""
     var lastTarget = BuildTarget.ios
     var inputs: [String: [String]] = [:]
@@ -46,7 +49,20 @@ struct LibraryGame: Codable, Identifiable, Equatable {
     var hasIOSApp: Bool { !iosAppPath.isEmpty && FileManager.default.fileExists(atPath: iosAppPath + "/Info.plist") }
     /// An iPhone build made before the shared app: a single IPA, or an app of its own. It stays in the library and Build makes
     /// the game again for the shared app, which then replaces it.
-    var isOlderIOSBuild: Bool { hasIOSBuild && !(hasIOSApp && ShellInstall.paths(ofApp: iosAppPath) != nil) }
+    var isOlderIOSBuild: Bool { hasIOSBuild && !hasSharedApp && !hasExportedIPA }
+    /// The shared app, signed and built in its shell folder.
+    var hasSharedApp: Bool { hasIOSApp && ShellInstall.paths(ofApp: iosAppPath) != nil }
+    /// An IPA the launcher exported: the shared app, or the game's own IPA. Another tool signs and installs it.
+    var hasExportedIPA: Bool { hasIPA && IPAKind(rawValue: ipaKind) != nil }
+
+    /// The status line's text key: the Mac app first, then the shared app, then an exported IPA, then an older iPhone build.
+    var statusKey: String {
+        if isReady { return "library.ready" }
+        if hasSharedApp { return "library.readyIOS" }
+        if hasExportedIPA { return "library.exportedIPA" }
+        if hasIOSBuild { return "library.olderIOS" }
+        return "library.notBuilt"
+    }
 
     /// What the hero's primary button does: play the Mac app, open the installed iPhone app, else build (an IPA alone is not a reason to show anything else).
     enum Primary: Equatable { case play, openOnDevice, build }
@@ -79,6 +95,7 @@ extension LibraryGame {
         launchOptions = try c.decodeIfPresent([String: String].self, forKey: .launchOptions) ?? [:]
         mods = try c.decodeIfPresent([String].self, forKey: .mods) ?? []
         iosAppPath = try c.decodeIfPresent(String.self, forKey: .iosAppPath) ?? ""
+        ipaKind = try c.decodeIfPresent(String.self, forKey: .ipaKind) ?? ""
         installedDevice = try c.decodeIfPresent(String.self, forKey: .installedDevice) ?? ""
         toolsCommit = try c.decodeIfPresent(String.self, forKey: .toolsCommit) ?? ""
     }
@@ -315,7 +332,7 @@ final class GameLibrary: ObservableObject {
         for index in games.indices {
             let game = games[index]
             if gone(game.appPath) { games[index].appPath = ""; changed = true }
-            if gone(game.ipaPath) { games[index].ipaPath = ""; changed = true }
+            if gone(game.ipaPath) { games[index].ipaPath = ""; games[index].ipaKind = ""; changed = true }
             if gone(game.iosAppPath, plist: true) { games[index].iosAppPath = ""; games[index].installedDevice = ""; changed = true }
         }
         if changed { save() }
@@ -571,6 +588,7 @@ final class GameLibrary: ObservableObject {
             game.iosAppPath = old.iosAppPath
             game.installedDevice = old.installedDevice
             game.ipaPath = old.ipaPath
+            game.ipaKind = old.ipaKind
             game.archivePath = old.archivePath
             games.removeAll { $0.id == old.id }
         }
@@ -580,56 +598,6 @@ final class GameLibrary: ObservableObject {
         game.toolsCommit = commit   // empty for a checkout without git: nothing to compare, rather than an older build's commit
         upsert(game)
         selectedID = game.id
-    }
-
-    func recordCompletedIOS(archive: String, app: String, device: String = "", commit: String = "", for id: UUID) {
-        guard var game = games.first(where: { $0.id == id }),
-              FileManager.default.fileExists(atPath: app + "/Info.plist") else { return }
-        // The shared app replaces an older build's single IPA: the file stays on disk, the library stops listing it
-        game.ipaPath = ""
-        if !archive.isEmpty { game.archivePath = archive }
-        game.iosAppPath = app
-        game.installedDevice = device
-        game.toolsCommit = commit
-        upsert(game)
-        recordSharedAppInstalled(app: app, device: device)
-    }
-
-    /// Every game in the shared app's shell.json is inside `app` on `device` once the shared app is signed and installed there.
-    func recordSharedAppInstalled(app: String, device: String) {
-        guard !device.isEmpty,
-              FileManager.default.fileExists(atPath: app + "/Info.plist"),
-              let shell = ShellInstall.paths(ofApp: app) else { return }
-        applySharedAppInstalled(titles: ShellLibrary.recordInstalled(root: shell.root), app: app, device: device)
-    }
-
-    private func applySharedAppInstalled(titles: Set<String>, app: String, device: String) {
-        guard !device.isEmpty, !titles.isEmpty else { return }
-        var changed = false
-        for i in games.indices where titles.contains(games[i].titleID.uppercased()) {
-            if games[i].iosAppPath != app || games[i].installedDevice != device || !games[i].ipaPath.isEmpty {
-                games[i].ipaPath = ""
-                games[i].iosAppPath = app
-                games[i].installedDevice = device
-                changed = true
-            }
-        }
-        if changed { save() }
-    }
-
-    /// Restores the shared app's games from the last successful install receipt when `DmShell.app` is signed on disk
-    /// (`embedded.mobileprovision` is present) and at least one receipt member still has recorded shared-app install provenance.
-    func syncSharedApp(root: String) {
-        let app = ShellInstall.appPath(root: root)
-        guard FileManager.default.fileExists(atPath: app + "/" + AppSignature.profileName) else { return }
-        let receipt = ShellLibrary.installedReceipt(root: root)
-        guard !receipt.isEmpty,
-              let device = games.first(where: {
-                  receipt.contains($0.titleID.uppercased())
-                      && !$0.installedDevice.isEmpty
-                      && ShellInstall.paths(ofApp: $0.iosAppPath) != nil
-              })?.installedDevice else { return }
-        applySharedAppInstalled(titles: receipt, app: app, device: device)
     }
 
     /// Only a choice that differs from the game's default is kept, so a setting left at its default follows a later build's.
@@ -756,7 +724,15 @@ final class GameLibrary: ObservableObject {
         save()
     }
 
-    @discardableResult private func upsert(_ game: LibraryGame) -> Bool {
+    /// Changes the games `change` returns true for, and saves once if any changed. For the extensions, which cannot set `games`.
+    func updateGames(_ change: (inout LibraryGame) -> Bool) {
+        var changed = false
+        for i in games.indices where change(&games[i]) { changed = true }
+        if changed { save() }
+    }
+
+    /// Internal, not private: the iPhone records in Library+IOS.swift use it.
+    @discardableResult func upsert(_ game: LibraryGame) -> Bool {
         if let index = games.firstIndex(where: { $0.id == game.id }) { games[index] = game }
         else { games.append(game) }
         return save()

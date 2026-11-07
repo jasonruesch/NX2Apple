@@ -980,6 +980,19 @@ import NXModel
         try capture("build", page: .builds)
         try capture("build-small", width: 900, height: 680, page: .builds)
         try capture("settings", page: .settings)
+        do {   // a game built for iPhone and exported as the shared app's IPA: the hero says so instead of "Not built yet"
+            let copy = temporary.appendingPathComponent("exported.json")
+            try? FileManager.default.removeItem(at: copy)
+            try FileManager.default.copyItem(at: temporary.appendingPathComponent("preview.json"), to: copy)
+            let exported = GameLibrary(file: copy)
+            let dread = try XCTUnwrap(exported.games.first { $0.titleID == "010093801237C000" })
+            let ipa = ShellInstall.ipaPath(root: temporary.appendingPathComponent("shell").path)
+            try FileManager.default.createDirectory(atPath: (ipa as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try Data([0]).write(to: URL(fileURLWithPath: ipa))
+            exported.recordExportedIPA(ipa, kind: .shared, for: dread.id)
+            exported.selectedID = dread.id
+            try capture("library-exported-ipa", only: exported)
+        }
         do {   // #87: a ZIP copy older than the app (no romfs_image.py), without git: auto-update off, then connected at launch, then a build refused
             let zip = temporary.appendingPathComponent("NX2Apple-0.4.5")
             for f in ["dm/tools/nx_extract/Program.cs", RepoLayout.buildScript] {
