@@ -214,8 +214,10 @@ package enum ShellInstall {
 
     // ---- 4: the project ----
 
+    /// `repo` is the launcher's repository: a checkout keeps the engine in its `engine/` folder (EngineLayout.root), an installed
+    /// engine tree is the engine itself. The shell's Swift package stays at the checkout's root (`shellPackage`).
     package static func projectCommand(repo: String) -> [String] {
-        ["/bin/bash", repo + "/dm/ios/tools/build_shell.sh", "--prepare-xcode"]
+        ["/bin/bash", EngineLayout.root(repo) + "/dm/ios/tools/build_shell.sh", "--prepare-xcode"]
     }
 
     /// The `frontend-ios` Swift package the shell project links (build_shell.sh's DM_SHELL_PACKAGE). The script defaults to

@@ -176,11 +176,16 @@ import NXModel
         XCTAssertNil(ShellInstall.builtFramework(workDir: try makeTree([])))
     }
 
-    func testCommandsAreExact() {
+    func testCommandsAreExact() throws {
         let root = "/R/NX2Apple-shell"
         XCTAssertEqual(ShellInstall.buildArguments(workDir: "/W", team: "T"), ["--shell-framework", "/W/shell-framework", "--team-id", "T"])
         XCTAssertEqual(ShellInstall.frameworkPath(workDir: "/W", titleID: "01"), "/W/shell-framework/DmGame01.framework")
         XCTAssertEqual(ShellInstall.projectCommand(repo: "/repo"), ["/bin/bash", "/repo/dm/ios/tools/build_shell.sh", "--prepare-xcode"])
+        // A checkout keeps the engine in engine/ (the launcher run from a checkout): the script is there, not at the checkout's root
+        let checkout = temporary.appendingPathComponent("checkout").path
+        try write(checkout + "/tools/engine.py", "")
+        try write(checkout + "/.upstream-ref", "")
+        XCTAssertEqual(ShellInstall.projectCommand(repo: checkout), ["/bin/bash", checkout + "/engine/dm/ios/tools/build_shell.sh", "--prepare-xcode"])
         let env = ShellInstall.projectEnvironment(root: root, frameworks: ["/f/a", "/f/b"], bundleID: "org.nxnative.shell", team: "T",
                                                   python: "/py", path: "/opt/homebrew/bin:/usr/bin", home: "/h", user: "u")
         XCTAssertEqual(env, ["SHELL_DIR": root + "/project", "DM_SHELL_FRAMEWORKS": "/f/a\n/f/b", "DM_BUNDLE_ID": "org.nxnative.shell",
