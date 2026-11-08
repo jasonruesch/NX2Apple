@@ -103,20 +103,20 @@ struct LauncherView: View {
         guard filter != libraryFilter else { return }
         withAnimation(.easeInOut(duration: 0.2)) { libraryFilter = filter }
         filter.save()
-        let after = filter.reconcile(games: library.games, selectedID: library.selectedID, focused: padFocus.focused)
+        let after = filter.reconcile(games: library.games, selectedID: library.selectedID, focused: padFocus.focused, shared: library.shared)
         if after.selectedID != library.selectedID { library.selectedID = after.selectedID }
         if after.focused != padFocus.focused { padFocus.focused = after.focused }
     }
 
     var filteredGames: [LibraryGame] {
-        libraryFilter.visibleGames(library.games, matching: search)
+        libraryFilter.visibleGames(library.games, matching: search, shared: library.shared)
     }
 
     /// The hero's game: the selection, unless the filter hides it, then the first game the filter shows.
     var heroGame: LibraryGame? {
         guard libraryFilter != .owned else { return library.selected }
-        if let selected = library.selected, libraryFilter.includes(selected) { return selected }
-        return libraryFilter.visibleGames(library.games).first
+        if let selected = library.selected, libraryFilter.includes(selected, shared: library.shared) { return selected }
+        return libraryFilter.visibleGames(library.games, shared: library.shared).first
     }
 
     var body: some View {
@@ -213,7 +213,7 @@ struct LauncherView: View {
             gamepad.capture = { [consoleDriver] id, action in consoleDriver.consumePress(controllerID: id, isBack: action == .b) }
             if performStartupChecks {
                 library.migrateLaunchOptions(); library.migrateArtwork(); CloudSavesMigration.run()
-                library.syncSharedApp(root: m.shellCachePath); library.syncExportedIPA(root: m.shellCachePath)
+                library.syncSharedApp(root: m.shellRoot)
             }
             if let slot = qaArtwork, artworkEditor == nil, let game = library.selected { openArtwork(game, slot: slot) }
             if qaManage.open {
@@ -239,13 +239,13 @@ struct LauncherView: View {
             DispatchQueue.main.async { BuildNotifier.shared.route = nil }
         }
         .onChange(of: library.games) { _ in
-            if performStartupChecks { library.syncSharedApp(root: m.shellCachePath); library.syncExportedIPA(root: m.shellCachePath) }
+            if performStartupChecks { library.syncSharedApp(root: m.shellRoot) }
             refreshArtwork()
             readSignatures()
             if performStartupChecks { fetchArtwork() }
         }
         .onChange(of: m.shellCachePath) { root in
-            if performStartupChecks { library.syncSharedApp(root: root); library.syncExportedIPA(root: root); readSignatures() }
+            if performStartupChecks { library.syncSharedApp(root: m.shellRoot); readSignatures() }
         }
         .onChange(of: repo.path) { _ in refreshArtwork(); if performStartupChecks { checkTools() } }
         // A clone, pull or update check has finished (the automatic pull at launch among them): the checkout may have moved
@@ -282,7 +282,7 @@ struct LauncherView: View {
             if done { DispatchQueue.main.async { recordBuild() } }
         }
         .onChange(of: scenePhase) { phase in
-            if phase == .active { library.objectWillChange.send() }
+            if phase == .active { library.refreshShared(root: m.shellRoot); library.objectWillChange.send() }   // the shell folder may have changed meanwhile
         }
         .alert(loc.t("library.error"), isPresented: Binding(
             get: { launchError != nil || library.error != nil },
@@ -734,9 +734,10 @@ struct LauncherView: View {
         guard m.done, let id = activeBuildID else { return }
         if m.target == BuildTarget.mac { library.recordCompletedApp(path: m.macAppPath, commit: buildCommit, for: id) }
         else if m.exportsOneGame {
-            library.recordExportedIPA(m.exportedIPAPath, kind: .oneGame, archive: m.archivePath, commit: buildCommit, for: id)
+            library.recordOneGameIPA(m.exportedIPAPath, commit: buildCommit, for: id)
         } else if m.addedToSharedApp {
             library.recordAddedToSharedApp(archive: m.archivePath, commit: buildCommit, for: id)
+            library.refreshShared(root: m.shellRoot)
         } else {
             library.recordCompletedIOS(archive: m.archivePath, app: m.installedAppPath, device: m.installedOn, commit: buildCommit, for: id)
             readSignatures()

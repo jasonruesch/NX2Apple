@@ -178,7 +178,8 @@ extension LauncherView {
                     .padTarget("library.filter", scope: "main", radius: 17,
                                activate: { setLibraryFilter(libraryFilter == .owned ? .built : .owned) },
                                adjust: { setLibraryFilter($0 > 0 ? .built : .owned) })
-                Text(String(format: loc.t("library.gameCount"), libraryFilter == .owned ? library.games.count : library.games.filter(libraryFilter.includes).count))
+                Text(String(format: loc.t("library.gameCount"), libraryFilter == .owned ? library.games.count
+                    : library.games.filter { libraryFilter.includes($0, shared: library.shared) }.count))
                     .font(.manrope(12)).foregroundStyle(.secondary)
             }
             selectionBar   // LauncherView+Queue.swift
@@ -268,9 +269,10 @@ extension LauncherView {
 
     func status(_ game: LibraryGame, prominent: Bool = false) -> some View {
         let building = m.running && activeBuildID == game.id
-        let color = building || (!game.isReady && game.needsGameData) ? LauncherPalette.building
-            : ((game.isReady || game.hasIOSBuild || game.addedToSharedApp) ? LauncherPalette.ready : LauncherPalette.unbuilt)
-        let key = building ? "library.building" : game.statusKey
+        let shared = library.shared
+        let color = building || (!game.isReady && game.needsGameData(shared)) ? LauncherPalette.building
+            : (game.isBuilt(shared) ? LauncherPalette.ready : LauncherPalette.unbuilt)
+        let key = building ? "library.building" : game.statusKey(shared)
         return HStack(spacing: 7) {
             Circle().fill(color).frame(width: prominent ? 9 : 7, height: prominent ? 9 : 7)
             Text(prominent ? loc.t(key).uppercased() : loc.t(key))

@@ -118,8 +118,8 @@ import NXModel
         let built = LibraryGame(titleID: titleID, name: "Hades", appPath: try makeApp(titleID).path)
         let unbuilt = LibraryGame(titleID: "0100000000010000", name: "Celeste")
         let games = [unbuilt, built]
-        XCTAssertEqual(games.filter(LibraryFilter.owned.includes).map(\.id), [unbuilt.id, built.id])
-        XCTAssertEqual(games.filter(LibraryFilter.built.includes).map(\.id), [built.id])
+        XCTAssertEqual(games.filter { LibraryFilter.owned.includes($0) }.map(\.id), [unbuilt.id, built.id])
+        XCTAssertEqual(games.filter { LibraryFilter.built.includes($0) }.map(\.id), [built.id])
 
         let hidden = LibraryFilter.built.reconcile(games: games, selectedID: unbuilt.id, focused: "card." + unbuilt.id.uuidString)
         XCTAssertEqual(hidden.selectedID, built.id)
@@ -1017,10 +1017,19 @@ import NXModel
             try FileManager.default.copyItem(at: temporary.appendingPathComponent("preview.json"), to: copy)
             let exported = GameLibrary(file: copy)
             let dread = try XCTUnwrap(exported.games.first { $0.titleID == "010093801237C000" })
-            let ipa = ShellInstall.ipaPath(root: temporary.appendingPathComponent("shell").path)
+            // What the status reads: Dread's framework in shell.json, its packed data, and an IPA newer than the framework
+            let root = temporary.appendingPathComponent("exported-shell").path
+            let framework = root + "/frameworks/DmGame010093801237C000.framework"
+            try FileManager.default.createDirectory(atPath: framework, withIntermediateDirectories: true)
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-60)], ofItemAtPath: framework)
+            try ShellLibrary(games: [.init(titleID: "010093801237C000", name: "Metroid Dread", framework: framework)]).save(root: root)
+            let data = temporary.appendingPathComponent("games/010093801237C000")
+            try FileManager.default.createDirectory(at: data, withIntermediateDirectories: true)
+            try Data("image".utf8).write(to: data.appendingPathComponent("romfs.img"))
+            let ipa = ShellInstall.ipaPath(root: root)
             try FileManager.default.createDirectory(atPath: (ipa as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
             try Data([0]).write(to: URL(fileURLWithPath: ipa))
-            exported.recordExportedIPA(ipa, kind: .shared, for: dread.id)
+            exported.refreshShared(root: root)
             exported.selectedID = dread.id
             try capture("library-exported-ipa", only: exported)
         }

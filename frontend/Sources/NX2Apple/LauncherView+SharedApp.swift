@@ -12,7 +12,7 @@ extension LauncherView {
             library.recordSharedAppInstalled(app: m.installedAppPath, device: m.installedOn)
             readSignatures()
         case .export:
-            library.recordSharedExport(m.exportedIPAPath, shellRoot: m.shellRoot)
+            library.refreshShared(root: m.shellRoot)   // the IPA is newer than the frameworks now
         case .send:
             break
         }

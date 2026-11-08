@@ -168,9 +168,11 @@ struct SharedAppPage: View {
     /// Each game of the shared app with the game data its last build packed (the library remembers it).
     private var entries: [SharedDataCard.Entry] {
         state.games.map { game in
-            let archive = library.games.first { $0.titleID.caseInsensitiveCompare(game.titleID) == .orderedSame }?.archivePath ?? ""
-            let present = !archive.isEmpty && FileManager.default.fileExists(atPath: archive)
-            return SharedDataCard.Entry(titleID: game.titleID, name: game.name.isEmpty ? game.titleID : game.name, archive: present ? archive : "")
+            // Where the archive step packs it (<output>/games/<title ID>), else where the last build recorded it
+            let known = library.games.first { $0.titleID.caseInsensitiveCompare(game.titleID) == .orderedSame }
+            let archive = [known?.gameDataPath, known?.archivePath].compactMap { $0 }
+                .first { !$0.isEmpty && FileManager.default.fileExists(atPath: $0 + "/romfs.img") } ?? ""
+            return SharedDataCard.Entry(titleID: game.titleID, name: game.name.isEmpty ? game.titleID : game.name, archive: archive)
         }
     }
 
@@ -179,7 +181,7 @@ struct SharedAppPage: View {
     private func remove(_ game: SharedAppState.Game) {
         removing = nil
         build.removeFromSharedApp(titleID: game.titleID)
-        library.recordRemovedFromSharedApp(titleID: game.titleID)
+        library.refreshShared(root: build.shellRoot)
         refresh()
     }
 }

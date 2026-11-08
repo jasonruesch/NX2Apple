@@ -35,9 +35,31 @@ package struct SharedAppState: Equatable {
     /// The last install on a device and the last export, nil when there was none.
     package var installedAt: Date?
     package var exportedAt: Date?
+    /// The uppercased title IDs the last install put on the device (its receipt), of the games still in shell.json.
+    package var installedTitles: Set<String>
 
-    package init(games: [Game], installedAt: Date?, exportedAt: Date?) {
-        self.games = games; self.installedAt = installedAt; self.exportedAt = exportedAt
+    package init(games: [Game], installedAt: Date?, exportedAt: Date?, installedTitles: Set<String> = []) {
+        self.games = games; self.installedAt = installedAt; self.exportedAt = exportedAt; self.installedTitles = installedTitles
+    }
+
+    /// No shell folder yet.
+    package static let empty = SharedAppState(games: [], installedAt: nil, exportedAt: nil)
+
+    /// The game with this title ID, when its framework is in the shell folder (a game whose framework is gone is not in the app).
+    package func game(_ titleID: String) -> Game? {
+        games.first { $0.titleID.caseInsensitiveCompare(titleID) == .orderedSame && $0.builtAt != nil }
+    }
+
+    /// The game's build is in the IPA exported last: the IPA is newer than its framework.
+    package func isInIPA(_ titleID: String) -> Bool {
+        guard let built = game(titleID)?.builtAt, let exported = exportedAt else { return false }
+        return built <= exported
+    }
+
+    /// The game's build is on the device the last install went to: the receipt names it and the install is newer than its framework.
+    package func isInstalled(_ titleID: String) -> Bool {
+        guard let built = game(titleID)?.builtAt, let installed = installedAt, installedTitles.contains(titleID.uppercased()) else { return false }
+        return built <= installed
     }
 
     /// Reads the shell folder: shell.json, each framework's date, the install receipt and the IPA.
@@ -47,7 +69,8 @@ package struct SharedAppState: Equatable {
         let games = ShellLibrary.load(root: root).games.map {
             Game(titleID: $0.titleID, name: $0.name, framework: $0.framework, builtAt: date($0.framework))
         }
-        return SharedAppState(games: games, installedAt: ShellLibrary.installedAt(root: root), exportedAt: date(ShellInstall.ipaPath(root: root)))
+        return SharedAppState(games: games, installedAt: ShellLibrary.installedAt(root: root), exportedAt: date(ShellInstall.ipaPath(root: root)),
+                              installedTitles: ShellLibrary.installedReceipt(root: root))
     }
 
     /// When the app the player makes next was last made: the install for a device, the IPA for an export.

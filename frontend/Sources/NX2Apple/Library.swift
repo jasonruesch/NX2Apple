@@ -10,13 +10,9 @@ struct LibraryGame: Codable, Identifiable, Equatable {
     var titleID: String
     var name: String
     var appPath = ""
+    /// An IPA of this game alone: one game's own IPA with its data inside, or one from before the shared app. Whether the game is in
+    /// the shared app, in its IPA or on the device is read from the shell folder instead (SharedAppState), not kept here.
     var ipaPath = ""
-    /// What `ipaPath` is when the launcher made it by exporting: the shared app (`IPAKind.shared`) or the game's own IPA with its data
-    /// inside (`IPAKind.oneGame`). Empty for an IPA from before the shared app, which `isOlderIOSBuild` then names.
-    var ipaKind = ""
-    /// A game build added the game to the shared app, and the shared app was not installed or exported since: the iPhone app page
-    /// makes it.
-    var addedToSharedApp = false
     var archivePath = ""
     var lastTarget = BuildTarget.ios
     var inputs: [String: [String]] = [:]
@@ -50,33 +46,53 @@ struct LibraryGame: Codable, Identifiable, Equatable {
     var hasIOSBuild: Bool { hasIPA || hasIOSApp }
     var hasIPA: Bool { !ipaPath.isEmpty && FileManager.default.fileExists(atPath: ipaPath) }
     var hasIOSApp: Bool { !iosAppPath.isEmpty && FileManager.default.fileExists(atPath: iosAppPath + "/Info.plist") }
-    /// An iPhone build made before the shared app: a single IPA, or an app of its own. It stays in the library and Build makes
-    /// the game again for the shared app, which then replaces it.
-    var isOlderIOSBuild: Bool { hasIOSBuild && !hasSharedApp && !hasExportedIPA }
     /// The shared app, signed and built in its shell folder.
     var hasSharedApp: Bool { hasIOSApp && ShellInstall.paths(ofApp: iosAppPath) != nil }
-    /// An IPA the launcher exported: the shared app, or the game's own IPA. Another tool signs and installs it.
-    var hasExportedIPA: Bool { hasIPA && IPAKind(rawValue: ipaKind) != nil }
 
-    /// The game data the last iPhone build packed (romfs.img, add-on content) is on this Mac. A path on a drive that is not connected
-    /// counts as there: the drive may come back.
+    /// The folder the archive step and a one-game export write into: the output folder, else the folder of the game's files.
+    var outputFolder: String {
+        if !outputDirectory.isEmpty { return outputDirectory }
+        if !sourceFolder.isEmpty { return sourceFolder }
+        return ((inputs["base"]?.first ?? "") as NSString).deletingLastPathComponent
+    }
+    /// Where the archive step packs this game's data: <output>/games/<title ID>.
+    var gameDataPath: String { outputFolder.isEmpty ? archivePath : outputFolder + "/games/" + titleID }
+    /// The game data (romfs.img, add-on content) is on this Mac, where the archive step puts it or where the last build recorded it. A
+    /// path on a drive that is not connected counts as there: the drive may come back.
     var hasGameData: Bool {
-        !archivePath.isEmpty && (GameLibrary.onUnmountedVolume(archivePath) || FileManager.default.fileExists(atPath: archivePath))
+        [gameDataPath, archivePath].contains { path in
+            !path.isEmpty && (GameLibrary.onUnmountedVolume(path) || FileManager.default.fileExists(atPath: path + "/romfs.img"))
+        }
     }
-    /// In the shared app, not installed from this Mac, and its game data is gone (its build folder was deleted): the shared app or its
-    /// IPA would hold the game's code but nothing to play until the game is built again. One game's own IPA holds its data.
-    var needsGameData: Bool {
-        (addedToSharedApp || ipaKind == IPAKind.shared.rawValue) && !hasSharedApp && !hasGameData
+    /// The game's own IPA with its data inside, where a one-game export writes it.
+    var hasOneGameIPA: Bool {
+        let path = OneGameIPA.path(folder: outputFolder, titleID: titleID)
+        return !outputFolder.isEmpty && FileManager.default.fileExists(atPath: path)
+    }
+    /// An iPhone build made before the shared app: a single IPA, or an app of its own. It stays in the library and Build makes
+    /// the game again for the shared app, which then replaces it.
+    var isOlderIOSBuild: Bool { hasIOSBuild && !hasSharedApp && !hasOneGameIPA }
+
+    /// In the shared app, not on the device in this build, and its game data is gone (its build folder was deleted): the shared app
+    /// holds the game's code but nothing to play until the game is built again.
+    func needsGameData(_ shared: SharedAppState) -> Bool {
+        shared.game(titleID) != nil && !shared.isInstalled(titleID) && !hasGameData
     }
 
-    /// The status line's text key: the Mac app first, then a shared app game whose data is gone, then the shared app, then an
-    /// exported IPA, then an older iPhone build.
-    var statusKey: String {
+    /// Built for some target: the Mac app, an iPhone build of its own, or its framework in the shared app (the Built filter).
+    func isBuilt(_ shared: SharedAppState) -> Bool { isReady || hasIOSBuild || hasOneGameIPA || shared.game(titleID) != nil }
+
+    /// The status line's text key, read from what is on disk: the Mac app first, then the shared app (game data gone, on the device,
+    /// in the exported IPA, or added and not made yet), then one game's own IPA, then an older iPhone build.
+    func statusKey(_ shared: SharedAppState) -> String {
         if isReady { return "library.ready" }
-        if needsGameData { return "library.needsGameData" }
-        if addedToSharedApp { return "library.inSharedApp" }
-        if hasSharedApp { return "library.readyIOS" }
-        if hasExportedIPA { return "library.exportedIPA" }
+        if shared.game(titleID) != nil {
+            if needsGameData(shared) { return "library.needsGameData" }
+            if shared.isInstalled(titleID) && hasSharedApp { return "library.readyIOS" }
+            if shared.isInIPA(titleID) { return "library.exportedIPA" }
+            return "library.inSharedApp"
+        }
+        if hasOneGameIPA { return "library.exportedIPA" }
         if hasIOSBuild { return "library.olderIOS" }
         return "library.notBuilt"
     }
@@ -112,8 +128,6 @@ extension LibraryGame {
         launchOptions = try c.decodeIfPresent([String: String].self, forKey: .launchOptions) ?? [:]
         mods = try c.decodeIfPresent([String].self, forKey: .mods) ?? []
         iosAppPath = try c.decodeIfPresent(String.self, forKey: .iosAppPath) ?? ""
-        ipaKind = try c.decodeIfPresent(String.self, forKey: .ipaKind) ?? ""
-        addedToSharedApp = try c.decodeIfPresent(Bool.self, forKey: .addedToSharedApp) ?? false
         installedDevice = try c.decodeIfPresent(String.self, forKey: .installedDevice) ?? ""
         toolsCommit = try c.decodeIfPresent(String.self, forKey: .toolsCommit) ?? ""
     }
@@ -301,6 +315,8 @@ final class GameLibrary: ObservableObject {
     /// The key of `LibraryGame.inputs` that holds a game folder (a Switch 2 game's base/, updates/, dlc/), read again on Build.
     static let folderInput = "folder"
     @Published private(set) var games: [LibraryGame] = []
+    /// What the shell folder says about the shared app (refreshShared, Library+IOS.swift): the iPhone statuses are read from it.
+    @Published var shared = SharedAppState.empty
     @Published var selectedID: UUID?
     @Published var error: String?
     @Published private(set) var folder = ""
@@ -350,7 +366,7 @@ final class GameLibrary: ObservableObject {
         for index in games.indices {
             let game = games[index]
             if gone(game.appPath) { games[index].appPath = ""; changed = true }
-            if gone(game.ipaPath) { games[index].ipaPath = ""; games[index].ipaKind = ""; changed = true }
+            if gone(game.ipaPath) { games[index].ipaPath = ""; changed = true }
             if gone(game.archivePath) { games[index].archivePath = ""; changed = true }   // the game data's build folder was deleted
             if gone(game.iosAppPath, plist: true) { games[index].iosAppPath = ""; games[index].installedDevice = ""; changed = true }
         }
@@ -607,7 +623,6 @@ final class GameLibrary: ObservableObject {
             game.iosAppPath = old.iosAppPath
             game.installedDevice = old.installedDevice
             game.ipaPath = old.ipaPath
-            game.ipaKind = old.ipaKind
             game.archivePath = old.archivePath
             games.removeAll { $0.id == old.id }
         }

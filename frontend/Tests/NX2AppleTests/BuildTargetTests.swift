@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 @testable import NX2Apple
 @testable import NXCore
 @testable import NXLauncher
@@ -48,13 +49,6 @@ final class BuildTargetTests: IsolatedDefaultsTestCase {
         XCTAssertEqual(none.lastTarget, "ios")
     }
 
-    /// A game data folder (what the archive step packs), so a shared app game has its data on this Mac.
-    private func gameData(_ titleID: String) throws -> String {
-        let url = temporary.appendingPathComponent("games/" + titleID)
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url.path
-    }
-
     private func app(named name: String, at folder: String) throws -> URL {
         let url = temporary.appendingPathComponent(folder).appendingPathComponent(name)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -98,158 +92,120 @@ final class BuildTargetTests: IsolatedDefaultsTestCase {
     }
 
     /// An export installs nothing, so the build used to record nothing and the game stayed "Not built yet".
-    func testAnExportedSharedAppIsListedForEveryGameInIt() throws {
-        let file = temporary.appendingPathComponent("library.json")
+    // ---- The iPhone statuses are read from the shell folder and the game data on disk, not recorded ----
+
+    private let hades = "0100535012974000", crossing = "01006F8002326000"
+
+    /// A shell folder with these games' frameworks in shell.json, each framework dated `built`.
+    private func shell(_ titles: [String], built: Date) throws -> String {
         let root = temporary.appendingPathComponent("shell").path
-        let ipa = ShellInstall.ipaPath(root: root)
-        try FileManager.default.createDirectory(atPath: (ipa as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try Data([0]).write(to: URL(fileURLWithPath: ipa))
-        var shell = ShellLibrary()
-        for tid in ["0100535012974000", "01006F8002326000"] {
-            let framework = try app(named: "DmGame\(tid).framework", at: "frameworks")
-            shell.add(.init(titleID: tid, name: tid, framework: framework.path))
+        var library = ShellLibrary()
+        for tid in titles {
+            let framework = root + "/frameworks/DmGame\(tid).framework"
+            try FileManager.default.createDirectory(atPath: framework, withIntermediateDirectories: true)
+            try FileManager.default.setAttributes([.modificationDate: built], ofItemAtPath: framework)
+            library.add(.init(titleID: tid, name: tid, framework: framework))
         }
-        try shell.save(root: root)
-        let built = LibraryGame(titleID: "0100535012974000", name: "Hades")
-        let other = LibraryGame(titleID: "01006F8002326000", name: "Animal Crossing", archivePath: try gameData("01006F8002326000"))
-        let installed = try app(named: "DmShell.app", at: "other/derived-data/Build/Products/Release-iphoneos")
-        let onDevice = LibraryGame(titleID: "01006F8002326001", name: "On device", iosAppPath: installed.path, installedDevice: "UDID")
-        let outside = LibraryGame(titleID: "0100000000010000", name: "Not in the shared app")
-        try JSONEncoder().encode([built, other, onDevice, outside]).write(to: file)
-        XCTAssertEqual(built.statusKey, "library.notBuilt")
-
-        let archive = try gameData("0100535012974000")
-        GameLibrary(file: file).recordExportedIPA(ipa, kind: .shared, archive: archive, shellRoot: root, commit: "abc", for: built.id)
-        let games = Dictionary(uniqueKeysWithValues: GameLibrary(file: file).games.map { ($0.titleID, $0) })
-        let stored = try XCTUnwrap(games[built.titleID])
-        XCTAssertEqual(stored.ipaPath, ipa)
-        XCTAssertEqual(stored.archivePath, archive)
-        XCTAssertEqual(stored.toolsCommit, "abc")
-        XCTAssertEqual(stored.statusKey, "library.exportedIPA")
-        XCTAssertFalse(stored.isOlderIOSBuild, "an export is not a build from before the shared app")
-        XCTAssertTrue(LibraryFilter.built.includes(stored), "the Built filter shows it")
-        XCTAssertEqual(games[other.titleID]?.statusKey, "library.exportedIPA", "the shared IPA holds every game in shell.json")
-        XCTAssertEqual(games[onDevice.titleID]?.statusKey, "library.readyIOS", "an installed shared app stays the status")
-        XCTAssertEqual(games[outside.titleID]?.statusKey, "library.notBuilt")
+        try library.save(root: root)
+        return root
     }
 
-    func testAnExportedOneGameIPAIsNotAnOlderBuild() throws {
-        let file = temporary.appendingPathComponent("library.json")
-        let ipa = OneGameIPA.path(folder: temporary.path, titleID: "0100535012974000")
-        try Data([0]).write(to: URL(fileURLWithPath: ipa))
-        let game = LibraryGame(titleID: "0100535012974000", name: "Hades")
-        try JSONEncoder().encode([game]).write(to: file)
-        let library = GameLibrary(file: file)
-        library.recordExportedIPA(ipa, kind: .oneGame, for: game.id)
-        let stored = try XCTUnwrap(GameLibrary(file: file).games.first)
-        XCTAssertEqual(stored.ipaKind, IPAKind.oneGame.rawValue)
-        XCTAssertEqual(stored.statusKey, "library.exportedIPA")
-        library.recordExportedIPA(temporary.path + "/none.ipa", kind: .oneGame, for: game.id)
-        XCTAssertEqual(GameLibrary(file: file).games.first?.ipaPath, ipa, "an export that made no IPA records nothing")
-
-        // An install of the shared app afterwards takes over, as it does for an older IPA
-        let shared = try app(named: "DmShell.app", at: "shell/derived-data/Build/Products/Release-iphoneos")
-        library.recordCompletedIOS(archive: "", app: shared.path, device: "UDID", for: game.id)
-        let installed = try XCTUnwrap(GameLibrary(file: file).games.first)
-        XCTAssertEqual(installed.ipaKind, "")
-        XCTAssertEqual(installed.statusKey, "library.readyIOS")
+    /// The packed game data where the archive step writes it: <output>/games/<title ID>/romfs.img.
+    @discardableResult private func packed(_ titleID: String) throws -> String {
+        let folder = temporary.appendingPathComponent("games/" + titleID)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("image".utf8).write(to: folder.appendingPathComponent("romfs.img"))
+        return folder.path
     }
 
-    /// An export made before the launcher recorded exports: the games in shell.json show it at start, when the IPA is newer than the list.
-    func testAnExportFromBeforeTheFixIsFoundAtStart() throws {
-        let file = temporary.appendingPathComponent("library.json")
-        let root = temporary.appendingPathComponent("shell").path
-        var shell = ShellLibrary()
-        for tid in ["0100535012974000", "01006F8002326000"] {
-            let framework = try app(named: "DmGame\(tid).framework", at: "frameworks")
-            shell.add(.init(titleID: tid, name: tid, framework: framework.path))
-        }
-        try shell.save(root: root)
-        let ipa = ShellInstall.ipaPath(root: root)
-        try FileManager.default.createDirectory(atPath: (ipa as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try Data([0]).write(to: URL(fileURLWithPath: ipa))
-        let own = OneGameIPA.path(folder: temporary.path, titleID: "01006F8002326000")
-        try Data([0]).write(to: URL(fileURLWithPath: own))
-        let hades = LibraryGame(titleID: "0100535012974000", name: "Hades", archivePath: try gameData("0100535012974000"))
-        let crossing = LibraryGame(titleID: "01006F8002326000", name: "Animal Crossing", ipaPath: own, ipaKind: IPAKind.oneGame.rawValue)
-        try JSONEncoder().encode([hades, crossing]).write(to: file)
+    func testTheSharedAppStatusesAreReadFromTheShellFolder() throws {
+        let hour = Date().addingTimeInterval(-3600)
+        let root = try shell([hades, crossing], built: hour)
+        try packed(hades)
+        let built = LibraryGame(titleID: hades, name: "Hades", outputDirectory: temporary.path)
+        let noData = LibraryGame(titleID: crossing, name: "Animal Crossing", outputDirectory: temporary.path)
+        let outside = LibraryGame(titleID: "0100000000010000", name: "Not in it", outputDirectory: temporary.path)
 
-        // shell.json written after the IPA (an install, or a game added since): the IPA does not hold this list
-        let later = Date().addingTimeInterval(60)
-        try FileManager.default.setAttributes([.modificationDate: later], ofItemAtPath: ShellLibrary.stateFile(root: root))
-        GameLibrary(file: file).syncExportedIPA(root: root)
-        XCTAssertEqual(GameLibrary(file: file).games.first { $0.titleID == hades.titleID }?.statusKey, "library.notBuilt")
-
-        try FileManager.default.setAttributes([.modificationDate: later.addingTimeInterval(60)], ofItemAtPath: ipa)
-        GameLibrary(file: file).syncExportedIPA(root: root)
-        let games = Dictionary(uniqueKeysWithValues: GameLibrary(file: file).games.map { ($0.titleID, $0) })
-        XCTAssertEqual(games[hades.titleID]?.ipaPath, ipa)
-        XCTAssertEqual(games[hades.titleID]?.statusKey, "library.exportedIPA")
-        XCTAssertEqual(games[crossing.titleID]?.ipaPath, own, "a game's own IPA stays")
-        GameLibrary(file: file).syncExportedIPA(root: temporary.appendingPathComponent("no-shell").path)   // no shell folder: nothing happens
-    }
-
-    /// A game build adds the game to the shared app; the page's install or export then lists it there, and removing it forgets both.
-    func testAGameAddedToTheSharedAppWaitsUntilThePageMakesIt() throws {
-        let file = temporary.appendingPathComponent("library.json")
-        let root = temporary.appendingPathComponent("shell").path
-        var shell = ShellLibrary()
-        let framework = try app(named: "DmGame0100535012974000.framework", at: "frameworks")
-        shell.add(.init(titleID: "0100535012974000", name: "Hades", framework: framework.path))
-        try shell.save(root: root)
-        let game = LibraryGame(titleID: "0100535012974000", name: "Hades")
-        try JSONEncoder().encode([game]).write(to: file)
-        let library = GameLibrary(file: file)
-
-        let archive = try gameData("0100535012974000")
-        library.recordAddedToSharedApp(archive: archive, commit: "abc", for: game.id)
-        var stored = try XCTUnwrap(GameLibrary(file: file).games.first)
-        XCTAssertTrue(stored.addedToSharedApp)
-        XCTAssertEqual(stored.statusKey, "library.inSharedApp")
-        XCTAssertEqual(stored.archivePath, archive)
-        XCTAssertTrue(LibraryFilter.built.includes(stored))
-        XCTAssertFalse(stored.isOlderIOSBuild)
+        var state = SharedAppState.read(root: root)
+        XCTAssertEqual(built.statusKey(state), "library.inSharedApp", "in shell.json, nothing made yet")
+        XCTAssertEqual(noData.statusKey(state), "library.needsGameData", "its build folder is gone: nothing to play")
+        XCTAssertEqual(outside.statusKey(state), "library.notBuilt")
+        XCTAssertTrue(LibraryFilter.built.includes(built, shared: state))
+        XCTAssertFalse(LibraryFilter.built.includes(outside, shared: state))
 
         let ipa = ShellInstall.ipaPath(root: root)
         try FileManager.default.createDirectory(atPath: (ipa as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         try Data([0]).write(to: URL(fileURLWithPath: ipa))
-        library.recordSharedExport(ipa, shellRoot: root)
-        stored = try XCTUnwrap(GameLibrary(file: file).games.first)
-        XCTAssertFalse(stored.addedToSharedApp)
-        XCTAssertEqual(stored.statusKey, "library.exportedIPA")
+        state = SharedAppState.read(root: root)
+        XCTAssertEqual(built.statusKey(state), "library.exportedIPA", "the IPA is newer than its framework")
+        XCTAssertEqual(noData.statusKey(state), "library.needsGameData", "in the IPA, but no data to send")
 
-        library.recordRemovedFromSharedApp(titleID: "0100535012974000")
-        stored = try XCTUnwrap(GameLibrary(file: file).games.first)
-        XCTAssertEqual(stored.ipaPath, "")
-        XCTAssertEqual(stored.statusKey, "library.notBuilt")
+        // The game built again after the export: its new build is not in that IPA
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)],
+                                              ofItemAtPath: state.game(hades)!.framework)
+        XCTAssertEqual(built.statusKey(SharedAppState.read(root: root)), "library.inSharedApp")
+
+        // Taken out of the shared app (the page's Remove): no record to clear, it is simply not there
+        var library = ShellLibrary.load(root: root)
+        library.remove(titleID: hades)
+        try library.save(root: root)
+        XCTAssertEqual(built.statusKey(SharedAppState.read(root: root)), "library.notBuilt")
     }
 
-    /// A game in the shared app whose build folder was deleted still has its code in the shell folder, but no game data: the status
-    /// says so instead of "Added to iPhone app" or "Exported as IPA", and the dead path is forgotten.
-    func testASharedAppGameWhoseDataIsGoneSaysSo() throws {
-        let file = temporary.appendingPathComponent("library.json")
-        let archive = temporary.appendingPathComponent("games/0100535012974000")
-        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
-        let ipa = temporary.appendingPathComponent("NX2Apple.ipa")
-        try Data([0]).write(to: ipa)
-        let added = LibraryGame(titleID: "0100535012974000", name: "Hades", addedToSharedApp: true, archivePath: archive.path)
-        let exported = LibraryGame(titleID: "01006F8002326000", name: "Animal Crossing", ipaPath: ipa.path, ipaKind: IPAKind.shared.rawValue)
-        let own = LibraryGame(titleID: "0100000000010000", name: "One game", ipaPath: ipa.path, ipaKind: IPAKind.oneGame.rawValue)
-        XCTAssertEqual(added.statusKey, "library.inSharedApp")
-        XCTAssertEqual(exported.statusKey, "library.needsGameData", "exported before the data was recorded: none on this Mac")
-        XCTAssertEqual(own.statusKey, "library.exportedIPA", "one game's own IPA holds its data")
+    /// An install is read from its receipt; the device it went to is the one thing the library keeps.
+    func testAnInstallIsReadFromTheReceiptAndTheDeviceFromTheRecord() throws {
+        let root = try shell([hades], built: Date().addingTimeInterval(-3600))
+        try packed(hades)
+        let app = try self.app(named: "DmShell.app", at: "shell/derived-data/Build/Products/Release-iphoneos")
+        let game = LibraryGame(titleID: hades, name: "Hades", outputDirectory: temporary.path, iosAppPath: app.path, installedDevice: "UDID")
+        XCTAssertEqual(game.statusKey(SharedAppState.read(root: root)), "library.inSharedApp", "no install receipt yet")
+        _ = ShellLibrary.recordInstalled(root: root)
+        let state = SharedAppState.read(root: root)
+        XCTAssertTrue(state.isInstalled(hades))
+        XCTAssertEqual(game.statusKey(state), "library.readyIOS")
+        try FileManager.default.removeItem(at: temporary.appendingPathComponent("games/" + hades))
+        XCTAssertEqual(game.statusKey(state), "library.readyIOS", "its data went over with the install: nothing is missing")
+    }
 
-        try FileManager.default.removeItem(at: archive)
-        XCTAssertTrue(added.needsGameData)
-        XCTAssertEqual(added.statusKey, "library.needsGameData")
-        let onDrive = LibraryGame(titleID: "1", name: "On a drive", addedToSharedApp: true, archivePath: "/Volumes/NoSuchDrive-\(UUID().uuidString)/games/1")
-        XCTAssertFalse(onDrive.needsGameData, "a drive that is not connected may come back")
+    /// One game's own IPA is found where a one-game export writes it; another single IPA is an older build.
+    func testAOneGameIPAIsReadFromItsFile() throws {
+        let game = LibraryGame(titleID: hades, name: "Hades", outputDirectory: temporary.path)
+        XCTAssertEqual(game.statusKey(.empty), "library.notBuilt")
+        try Data([0]).write(to: URL(fileURLWithPath: OneGameIPA.path(folder: temporary.path, titleID: hades)))
+        XCTAssertTrue(game.hasOneGameIPA)
+        XCTAssertEqual(game.statusKey(.empty), "library.exportedIPA")
+        XCTAssertFalse(game.isOlderIOSBuild)
 
-        try JSONEncoder().encode([added]).write(to: file)
-        let library = GameLibrary(file: file)
-        library.pruneMissingPaths()
-        XCTAssertEqual(GameLibrary(file: file).games.first?.archivePath, "", "the deleted folder is forgotten")
-        XCTAssertEqual(GameLibrary(file: file).games.first?.statusKey, "library.needsGameData")
+        let older = temporary.appendingPathComponent("Hades.ipa")
+        try Data([0]).write(to: older)
+        let single = LibraryGame(titleID: crossing, name: "Animal Crossing", ipaPath: older.path, outputDirectory: temporary.path)
+        XCTAssertEqual(single.statusKey(.empty), "library.olderIOS")
+    }
+
+    func testGameDataIsFoundWhereTheArchiveStepPacksItOrWhereItWasRecorded() throws {
+        let game = LibraryGame(titleID: hades, name: "Hades", outputDirectory: temporary.path)
+        XCTAssertEqual(game.gameDataPath, temporary.path + "/games/" + hades)
+        XCTAssertFalse(game.hasGameData)
+        try packed(hades)
+        XCTAssertTrue(game.hasGameData)
+        let elsewhere = temporary.appendingPathComponent("moved")
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        try Data("image".utf8).write(to: elsewhere.appendingPathComponent("romfs.img"))
+        XCTAssertTrue(LibraryGame(titleID: crossing, name: "C", archivePath: elsewhere.path, outputDirectory: temporary.path).hasGameData)
+        let onDrive = LibraryGame(titleID: crossing, name: "C", archivePath: "/Volumes/NoSuchDrive-\(UUID().uuidString)/games/x")
+        XCTAssertTrue(onDrive.hasGameData, "a drive that is not connected may come back")
+    }
+
+    func testTheLibraryRefreshesItsSharedStateOnlyWhenItChanged() throws {
+        let root = try shell([hades], built: Date().addingTimeInterval(-3600))
+        let library = GameLibrary(file: temporary.appendingPathComponent("library.json"))
+        var published = 0
+        let token = library.$shared.dropFirst().sink { _ in published += 1 }
+        library.refreshShared(root: root)
+        library.refreshShared(root: root)
+        withExtendedLifetime(token) {}
+        XCTAssertEqual(published, 1, "the second read found nothing new")
+        XCTAssertNotNil(library.shared.game(hades))
     }
 
     func testEveryLanguageNamesAnExportedIPA() {
