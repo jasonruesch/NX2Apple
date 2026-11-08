@@ -61,4 +61,38 @@ final class SharedDriveCopyTests: IsolatedDefaultsTestCase {
         XCTAssertFalse(model.running)
         guard case .failed = model.send else { return XCTFail("expected a refusal, got \(model.send)") }
     }
+
+    /// Copy all: every game's data onto the drive, one after another, each kept as copied.
+    @MainActor func testCopyAllCopiesEveryGameInTurn() throws {
+        let fm = FileManager.default
+        let root = temporary.appendingPathComponent("shell").path
+        testDefaults.set(root, forKey: "shellRoot")
+        let stores = LauncherStores(defaults: testDefaults); let model = stores.build
+        let ipa = ShellInstall.ipaPath(root: root)
+        try fm.createDirectory(atPath: (ipa as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try Data([0]).write(to: URL(fileURLWithPath: ipa))
+        var items: [SharedGameData] = []
+        for tid in [titleID, "01006F8002326000"] {
+            let archive = temporary.appendingPathComponent("out/\(tid)").path
+            try fm.createDirectory(atPath: archive, withIntermediateDirectories: true)
+            try Data(tid.utf8).write(to: URL(fileURLWithPath: archive + "/romfs.img"))
+            items.append(SharedGameData(titleID: tid, archive: archive))
+        }
+        items.append(SharedGameData(titleID: "0100000000010000", archive: ""))   // no game data: left out
+        let drive = temporary.appendingPathComponent("drive").path
+        try fm.createDirectory(atPath: drive, withIntermediateDirectories: true)
+        stores.deviceStore.driveFolder = drive
+
+        let finished = expectation(description: "All copied")
+        let token = model.$sharedAll.dropFirst().filter { $0 == nil }.prefix(1).sink { _ in finished.fulfill() }
+        model.sendAllSharedData(items, toDrive: true)
+        XCTAssertEqual(model.sharedAll?.total, 2)
+        wait(for: [finished], timeout: 30)
+        withExtendedLifetime(token) {}
+        for item in items.prefix(2) {
+            XCTAssertEqual(try String(contentsOfFile: drive + "/\(item.titleID)/romfs.img"), item.titleID)
+            XCTAssertTrue(model.sharedSent.contains(BuildStore.sentKey(item.archive, toDrive: true)))
+        }
+        XCTAssertFalse(model.running)
+    }
 }

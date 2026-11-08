@@ -2,8 +2,8 @@ import SwiftUI
 import NXCore
 import NXModel
 
-/// Step 3 of an export from the iPhone app page: each game's data into the shared app another tool installed, one game at a time,
-/// over the install's own copy step. A copy the device refuses offers the Finder way. Observes the build store (the send) and the
+/// Step 3 of an export from the iPhone app page: each game's data into the shared app another tool installed, or onto a drive, one game
+/// at a time or all of them (Send all, Copy all), over the install's own copy step. A copy the device refuses offers the Finder way. Observes the build store (the send) and the
 /// device store (the device the data goes to).
 package struct SharedDataCard: View {
     package struct Entry: Identifiable, Equatable {
@@ -46,6 +46,19 @@ package struct SharedDataCard: View {
                     }
                 }
             }
+            if withData.count > 1 || build.sharedAll != nil {
+                CardDivider()
+                CardRow(allTitle, detail: allDetail) {
+                    if let all = build.sharedAll {
+                        if all.toDrive, case .copying = build.send { Button(loc.t("btn.stop")) { build.stopDriveCopy() } }
+                    } else {
+                        Button(String(format: loc.t(toDrive ? "shared.copyAll" : "shared.sendAll"), withData.count)) {
+                            build.sendAllSharedData(withData.map { SharedGameData(titleID: $0.titleID, archive: $0.archive) }, toDrive: toDrive)
+                        }
+                        .disabled(build.running || (toDrive ? devices.driveFolder.isEmpty : devices.installDevice.isEmpty))
+                    }
+                }
+            }
             if case .chooseApp(let apps) = build.send {
                 CardDivider()
                 CardRow(loc.t("shell.sendSeveral")) {
@@ -66,6 +79,20 @@ package struct SharedDataCard: View {
     }
 
     private var toDrive: Bool { devices.sendWhere == SendWhere.drive }
+    private var withData: [Entry] { games.filter { !$0.archive.isEmpty } }
+
+    private var allTitle: String {
+        guard let all = build.sharedAll else { return loc.t(toDrive ? "shared.allDriveTitle" : "shared.allDeviceTitle") }
+        return String(format: loc.t(all.toDrive ? "shared.copyingAll" : "shared.sendingAll"), min(all.done + 1, all.total), all.total)
+    }
+
+    private var allDetail: String {
+        build.sharedAll == nil ? loc.t("shared.allNote") : ""
+    }
+
+    private func sent(_ game: Entry) -> Bool {
+        build.sharedSent.contains(BuildStore.sentKey(game.archive, toDrive: toDrive))
+    }
 
     /// What the card's foot says: where the data goes, and what is still to choose.
     private var footnote: String {
@@ -83,7 +110,7 @@ package struct SharedDataCard: View {
 
     private func detail(_ game: Entry) -> String {
         guard !game.archive.isEmpty else { return loc.t("shared.noData") }
-        guard isCurrent(game) else { return build.shortPath(game.archive) }
+        guard isCurrent(game) else { return sent(game) ? loc.t(toDrive ? "shared.copiedShort" : "shared.sentShort") : build.shortPath(game.archive) }
         switch build.send {
         case .sending(let done, let total, let note):
             return String(format: loc.t("shell.sendProgress"), game.name, ShellInstall.sizeText(done), ShellInstall.sizeText(total))
@@ -101,7 +128,7 @@ package struct SharedDataCard: View {
     }
 
     private func dot(_ game: Entry) -> Color? {
-        guard isCurrent(game) else { return nil }
+        guard isCurrent(game) else { return sent(game) ? LauncherPalette.ready : nil }
         switch build.send {
         case .sent: return LauncherPalette.ready
         case .sending, .copying: return LauncherPalette.building

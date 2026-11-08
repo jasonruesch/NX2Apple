@@ -12,6 +12,13 @@ package enum SharedJob: Equatable {
     case install, export, send
 }
 
+/// Where Send all or Copy all stands: games done and games it covers, and whether it copies to a drive.
+package struct SharedAllProgress: Equatable {
+    package var done: Int
+    package var total: Int
+    package var toDrive: Bool
+}
+
 extension BuildStore {
     /// The end of a game build for the shared app: the game joins shell.json, and nothing else is made.
     func addToSharedApp(framework: String, titleID: String, name: String) {
@@ -76,7 +83,55 @@ extension BuildStore {
         sharedJob = .send
         archivePath = archive
         exportedIPAPath = ipa
-        sendGameData(bundle: bundle)
+        if sharedAll != nil, let bundle { sharedAllBundle = bundle }   // the copy of the app chosen once serves the other games too
+        sendGameData(bundle: bundle ?? (sharedAll != nil ? sharedAllBundle : nil))
+    }
+
+    /// Send all or Copy all: the game data of every game that has some, one game after another, to the device or onto the drive.
+    /// The first game that fails stops it, with its reason on that game; a choice between several copies of the app waits for the
+    /// player and is then kept for the others.
+    package func sendAllSharedData(_ items: [SharedGameData], toDrive: Bool) {
+        let todo = items.filter { !$0.archive.isEmpty }
+        guard !running, sharedAll == nil, let first = todo.first else { return }
+        sharedPending = Array(todo.dropFirst())
+        sharedAllBundle = nil
+        sharedAll = SharedAllProgress(done: 0, total: todo.count, toDrive: toDrive)
+        startSharedSend(first, toDrive: toDrive)
+    }
+
+    /// The key `sharedSent` keeps a game under for this kind of send.
+    package static func sentKey(_ archive: String, toDrive: Bool) -> String { (toDrive ? "drive:" : "device:") + archive }
+
+    private func startSharedSend(_ item: SharedGameData, toDrive: Bool) {
+        if toDrive { copySharedDataToDrive(titleID: item.titleID, archive: item.archive) }
+        else { sendSharedData(titleID: item.titleID, archive: item.archive) }
+        if !running { stopSharedAll() }   // it did not start (no IPA, no folder, a refused drive): nothing would go on from it
+    }
+
+    /// A send or copy changed state: a finished one is kept for its game, and Send all goes on with the next game or stops.
+    func sharedSendChanged() {
+        switch send {
+        case .sent, .copied:
+            if sharedJob == .send, !archivePath.isEmpty {
+                if case .copied = send { sharedSent.insert(Self.sentKey(archivePath, toDrive: true)) }
+                else { sharedSent.insert(Self.sentKey(archivePath, toDrive: false)) }
+            }
+            guard var all = sharedAll else { return }
+            all.done += 1
+            sharedAll = all
+            guard !sharedPending.isEmpty else { stopSharedAll(); return }
+            let next = sharedPending.removeFirst()
+            DispatchQueue.main.async { [weak self] in self?.startSharedSend(next, toDrive: all.toDrive) }
+        case .sending, .copying, .chooseApp:
+            break
+        case .idle, .appNotFound, .refused, .failed:
+            stopSharedAll()   // stopped, or this game failed: the others wait for the player
+        }
+    }
+
+    private func stopSharedAll() {
+        sharedPending = []
+        sharedAll = nil
     }
 
     /// The game data of one game onto the chosen drive or folder, in `<folder>/<title ID>/`, for the iPhone's Game data folder. A drive

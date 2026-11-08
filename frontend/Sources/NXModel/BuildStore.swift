@@ -169,8 +169,15 @@ func hop(_ body: @escaping @MainActor () -> Void) {
     /// What the iPhone app page runs, nil for a game build: the launcher records a game build only when this is nil.
     @Published package var sharedJob: SharedJob?
     @Published package var send: DataSend = .idle {  // step 3 of the export: the game data on its way (BuildStore+Send.swift)
-        didSet { if send != oldValue { finderShown = false } }
+        didSet { if send != oldValue { finderShown = false; sharedSendChanged() } }   // sharedSendChanged: BuildStore+SharedApp.swift
     }
+    /// The games whose data the iPhone app page sent or copied this session, as "device:" or "drive:" plus the game data folder.
+    @Published package var sharedSent: Set<String> = []
+    /// Send all or Copy all on the iPhone app page: how many games are done and how many it covers, nil when none runs.
+    @Published package var sharedAll: SharedAllProgress?
+    /// The games Send all or Copy all has still to do, and the copy of the app the player chose when the device has several.
+    var sharedPending: [SharedGameData] = []
+    var sharedAllBundle: String?
     /// The player chose the Finder way after the copy to the device did not work: step 3 shows its three steps (#491).
     @Published package var finderShown = false
     @Published package var drive: DriveState?      // the chosen folder's volume and what stops the copy (BuildStore+Send.swift)
