@@ -58,9 +58,22 @@ struct LibraryGame: Codable, Identifiable, Equatable {
     /// An IPA the launcher exported: the shared app, or the game's own IPA. Another tool signs and installs it.
     var hasExportedIPA: Bool { hasIPA && IPAKind(rawValue: ipaKind) != nil }
 
-    /// The status line's text key: the Mac app first, then the shared app, then an exported IPA, then an older iPhone build.
+    /// The game data the last iPhone build packed (romfs.img, add-on content) is on this Mac. A path on a drive that is not connected
+    /// counts as there: the drive may come back.
+    var hasGameData: Bool {
+        !archivePath.isEmpty && (GameLibrary.onUnmountedVolume(archivePath) || FileManager.default.fileExists(atPath: archivePath))
+    }
+    /// In the shared app, not installed from this Mac, and its game data is gone (its build folder was deleted): the shared app or its
+    /// IPA would hold the game's code but nothing to play until the game is built again. One game's own IPA holds its data.
+    var needsGameData: Bool {
+        (addedToSharedApp || ipaKind == IPAKind.shared.rawValue) && !hasSharedApp && !hasGameData
+    }
+
+    /// The status line's text key: the Mac app first, then a shared app game whose data is gone, then the shared app, then an
+    /// exported IPA, then an older iPhone build.
     var statusKey: String {
         if isReady { return "library.ready" }
+        if needsGameData { return "library.needsGameData" }
         if addedToSharedApp { return "library.inSharedApp" }
         if hasSharedApp { return "library.readyIOS" }
         if hasExportedIPA { return "library.exportedIPA" }
@@ -338,6 +351,7 @@ final class GameLibrary: ObservableObject {
             let game = games[index]
             if gone(game.appPath) { games[index].appPath = ""; changed = true }
             if gone(game.ipaPath) { games[index].ipaPath = ""; games[index].ipaKind = ""; changed = true }
+            if gone(game.archivePath) { games[index].archivePath = ""; changed = true }   // the game data's build folder was deleted
             if gone(game.iosAppPath, plist: true) { games[index].iosAppPath = ""; games[index].installedDevice = ""; changed = true }
         }
         if changed { save() }

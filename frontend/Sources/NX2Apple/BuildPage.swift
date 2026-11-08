@@ -16,6 +16,8 @@ struct BuildPage: View {
     @Binding var extrasOpen: Bool   // the optional input rows of the files card
     @Binding var logOpen: Bool   // the log card's disclosure
     var queue: BuildQueue?   // the batch the library sent (QueueCard)
+    var onShowQueued: (UUID) -> Void = { _ in }   // shows a batch game's files in the cards (LauncherView+Queue.swift)
+    var onStartQueue: () -> Void = {}   // the Build games button
     @State private var showRunningSetup = false
     var onViewGame: () -> Void = {}
     var onOpenSettings: () -> Void = {}
@@ -24,7 +26,7 @@ struct BuildPage: View {
 
     var body: some View {
         CardPageHeading(loc.t("build.heading"), note: loc.t(running ? (build.target == BuildTarget.mac ? "activity.mac" : "activity.ios") : "build.intro"))
-        if let queue { QueueCard(queue: queue) }
+        if let queue { QueueCard(queue: queue, onSelect: onShowQueued) }
         if running {
             ProgressCard(build: build)
             CardDisclosure(loc.t("section.setup"), detail: build.gameName, isOpen: showRunningSetup) { showRunningSetup.toggle() }
@@ -42,7 +44,11 @@ struct BuildPage: View {
         LogCard(log: build.log, devices: devices, isOpen: $logOpen,
                 showRequests: BuildNotifier.shared.$showLog.eraseToAnyPublisher(),   // a clicked notification of a failed build
                 didShow: { BuildNotifier.shared.showLog = false })
-        ActionCard(build: build, dependencies: dependencies, repo: repo)
+        if let queue {
+            ActionCard(build: build, dependencies: dependencies, repo: repo, queue: queue, onStartQueue: onStartQueue)
+        } else {
+            ActionCard(build: build, dependencies: dependencies, repo: repo)
+        }
         Group {   // a ViewBuilder holds ten views at most
             ShellCopyCard(devices: devices)
             BuildFailureCard(m: build)

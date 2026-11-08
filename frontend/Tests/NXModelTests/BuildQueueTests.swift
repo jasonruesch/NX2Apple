@@ -77,4 +77,34 @@ import XCTest
         queue.buildEnded(id: nil, ok: true, note: "")   // the other build ended: not one of the queue's
         XCTAssertEqual(queue.entries.map(\.state), [.building, .waiting])
     }
+
+    /// Picked games wait while the player checks each one's files; Build games starts the batch from the first game, whichever one
+    /// the page shows.
+    func testAPreparedBatchWaitsAndStartsFromTheFirstGame() {
+        let queue = BuildQueue()
+        var started: [(UUID, String)] = []
+        queue.start = { id, target in started.append((id, target)); return .started }
+        queue.enqueue([(a, "A"), (b, "B"), (c, "C")], target: "ios", buildRunning: false, start: false)
+        XCTAssertTrue(started.isEmpty, "nothing builds before Build games")
+        XCTAssertTrue(queue.isPrepared)
+        XCTAssertFalse(queue.isActive)
+        XCTAssertEqual(queue.selectedID, a, "the first game's files are shown")
+        queue.select(c)
+        queue.setTarget("mac-app", for: c)
+        queue.remove(b)
+        queue.buildEnded(id: nil, ok: true, note: "")   // another build ended: the prepared batch still waits
+        XCTAssertTrue(started.isEmpty)
+        XCTAssertEqual(queue.waitingCount, 2)
+
+        queue.startAll()
+        XCTAssertEqual(started.map(\.0), [a], "the first game, though C was shown")
+        XCTAssertNil(queue.selectedID)
+        XCTAssertTrue(queue.isActive)
+        queue.buildEnded(id: a, ok: true, note: "")
+        XCTAssertEqual(started.map(\.0), [a, c])
+        XCTAssertEqual(started.last?.1, "mac-app", "the target set while its files were shown")
+        queue.buildEnded(id: c, ok: true, note: "")
+        XCTAssertFalse(queue.started, "the batch has finished")
+        XCTAssertFalse(queue.isPrepared)
+    }
 }

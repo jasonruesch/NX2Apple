@@ -79,12 +79,14 @@ struct SharedAppPage: View {
     }
 
     private var gamesCard: some View {
-        CardGroup(String(format: loc.t("shared.gamesCount"), state.games.count)) {
+        let data = Dictionary(uniqueKeysWithValues: entries.map { ($0.titleID, !$0.archive.isEmpty) })
+        return CardGroup(String(format: loc.t("shared.gamesCount"), state.games.count)) {
             ForEach(Array(state.games.enumerated()), id: \.element.id) { index, game in
                 if index > 0 { CardDivider() }
-                let new = state.isNew(game, export: export)
-                CardRow(game.name.isEmpty ? game.titleID : game.name, detail: gameDetail(game, new: new),
-                        dot: new ? LauncherPalette.building : LauncherPalette.ready, help: game.framework) {
+                let new = state.isNew(game, export: export), hasData = data[game.titleID] ?? false
+                CardRow(game.name.isEmpty ? game.titleID : game.name,
+                        detail: gameDetail(game, new: new) + (hasData ? "" : " · " + loc.t("shared.dataMissing")),
+                        dot: new || !hasData ? LauncherPalette.building : LauncherPalette.ready, help: game.framework) {
                     Button(loc.t("shared.remove")) { removing = game }
                         .disabled(build.running)
                 }

@@ -181,7 +181,7 @@ struct LauncherView: View {
                 SharedAppPage(build: m, devices: devices, library: library, onNewBuild: newBuild, onViewGame: { page = .library })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                CardPages(settings: page == .settings, queue: queue, onOpenSharedApp: { page = .iphone }, build: m, updates: updates, repo: repo, engine: engine, dependencies: stores.dependencies, devices: devices,
+                CardPages(settings: page == .settings, queue: queue, onShowQueued: showQueued, onStartQueue: startQueue, onOpenSharedApp: { page = .iphone }, build: m, updates: updates, repo: repo, engine: engine, dependencies: stores.dependencies, devices: devices,
                           library: library, diagnostics: stores.diagnostics, onViewGame: { page = .library }, onOpenSettings: { page = .settings },
                           onChooseLibraryFolder: chooseLibraryFolder, onOpenControls: { controlsOpen = true }, onOpenControllers: { controllerSheet = true }, onRunSetup: onRunSetup, controlChanges: controls.changeCount,
                           padMerge: Binding(get: { controls.padMerge }, set: { setPadMerge($0) }))
@@ -270,7 +270,7 @@ struct LauncherView: View {
                     guard !m.running else { return }   // a build may have started since the idle notification
                     if m.done { recordBuild() }
                     // The queue learns which game ended and how, as they are now: a second report of the same end finds no game
-                    let ended = m.sharedJob == nil ? activeBuildID : nil, ok = m.done, note = m.doneNote
+                    let ended = m.sharedJob == nil ? activeBuildID : nil, ok = m.done, note = m.done ? "" : failureNote
                     activeBuildID = nil
                     DispatchQueue.main.async { queue.buildEnded(id: ended, ok: ok, note: note) }   // any end lets a waiting game start
                     engine.applyPendingEngine()   // an engine installed during the build takes over once it is recorded

@@ -48,6 +48,13 @@ final class BuildTargetTests: IsolatedDefaultsTestCase {
         XCTAssertEqual(none.lastTarget, "ios")
     }
 
+    /// A game data folder (what the archive step packs), so a shared app game has its data on this Mac.
+    private func gameData(_ titleID: String) throws -> String {
+        let url = temporary.appendingPathComponent("games/" + titleID)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url.path
+    }
+
     private func app(named name: String, at folder: String) throws -> URL {
         let url = temporary.appendingPathComponent(folder).appendingPathComponent(name)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -104,18 +111,19 @@ final class BuildTargetTests: IsolatedDefaultsTestCase {
         }
         try shell.save(root: root)
         let built = LibraryGame(titleID: "0100535012974000", name: "Hades")
-        let other = LibraryGame(titleID: "01006F8002326000", name: "Animal Crossing")
+        let other = LibraryGame(titleID: "01006F8002326000", name: "Animal Crossing", archivePath: try gameData("01006F8002326000"))
         let installed = try app(named: "DmShell.app", at: "other/derived-data/Build/Products/Release-iphoneos")
         let onDevice = LibraryGame(titleID: "01006F8002326001", name: "On device", iosAppPath: installed.path, installedDevice: "UDID")
         let outside = LibraryGame(titleID: "0100000000010000", name: "Not in the shared app")
         try JSONEncoder().encode([built, other, onDevice, outside]).write(to: file)
         XCTAssertEqual(built.statusKey, "library.notBuilt")
 
-        GameLibrary(file: file).recordExportedIPA(ipa, kind: .shared, archive: "/games/Hades/archive", shellRoot: root, commit: "abc", for: built.id)
+        let archive = try gameData("0100535012974000")
+        GameLibrary(file: file).recordExportedIPA(ipa, kind: .shared, archive: archive, shellRoot: root, commit: "abc", for: built.id)
         let games = Dictionary(uniqueKeysWithValues: GameLibrary(file: file).games.map { ($0.titleID, $0) })
         let stored = try XCTUnwrap(games[built.titleID])
         XCTAssertEqual(stored.ipaPath, ipa)
-        XCTAssertEqual(stored.archivePath, "/games/Hades/archive")
+        XCTAssertEqual(stored.archivePath, archive)
         XCTAssertEqual(stored.toolsCommit, "abc")
         XCTAssertEqual(stored.statusKey, "library.exportedIPA")
         XCTAssertFalse(stored.isOlderIOSBuild, "an export is not a build from before the shared app")
@@ -162,7 +170,7 @@ final class BuildTargetTests: IsolatedDefaultsTestCase {
         try Data([0]).write(to: URL(fileURLWithPath: ipa))
         let own = OneGameIPA.path(folder: temporary.path, titleID: "01006F8002326000")
         try Data([0]).write(to: URL(fileURLWithPath: own))
-        let hades = LibraryGame(titleID: "0100535012974000", name: "Hades")
+        let hades = LibraryGame(titleID: "0100535012974000", name: "Hades", archivePath: try gameData("0100535012974000"))
         let crossing = LibraryGame(titleID: "01006F8002326000", name: "Animal Crossing", ipaPath: own, ipaKind: IPAKind.oneGame.rawValue)
         try JSONEncoder().encode([hades, crossing]).write(to: file)
 
@@ -193,11 +201,12 @@ final class BuildTargetTests: IsolatedDefaultsTestCase {
         try JSONEncoder().encode([game]).write(to: file)
         let library = GameLibrary(file: file)
 
-        library.recordAddedToSharedApp(archive: "/games/Hades/0100535012974000", commit: "abc", for: game.id)
+        let archive = try gameData("0100535012974000")
+        library.recordAddedToSharedApp(archive: archive, commit: "abc", for: game.id)
         var stored = try XCTUnwrap(GameLibrary(file: file).games.first)
         XCTAssertTrue(stored.addedToSharedApp)
         XCTAssertEqual(stored.statusKey, "library.inSharedApp")
-        XCTAssertEqual(stored.archivePath, "/games/Hades/0100535012974000")
+        XCTAssertEqual(stored.archivePath, archive)
         XCTAssertTrue(LibraryFilter.built.includes(stored))
         XCTAssertFalse(stored.isOlderIOSBuild)
 
@@ -213,6 +222,34 @@ final class BuildTargetTests: IsolatedDefaultsTestCase {
         stored = try XCTUnwrap(GameLibrary(file: file).games.first)
         XCTAssertEqual(stored.ipaPath, "")
         XCTAssertEqual(stored.statusKey, "library.notBuilt")
+    }
+
+    /// A game in the shared app whose build folder was deleted still has its code in the shell folder, but no game data: the status
+    /// says so instead of "Added to iPhone app" or "Exported as IPA", and the dead path is forgotten.
+    func testASharedAppGameWhoseDataIsGoneSaysSo() throws {
+        let file = temporary.appendingPathComponent("library.json")
+        let archive = temporary.appendingPathComponent("games/0100535012974000")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        let ipa = temporary.appendingPathComponent("NX2Apple.ipa")
+        try Data([0]).write(to: ipa)
+        let added = LibraryGame(titleID: "0100535012974000", name: "Hades", addedToSharedApp: true, archivePath: archive.path)
+        let exported = LibraryGame(titleID: "01006F8002326000", name: "Animal Crossing", ipaPath: ipa.path, ipaKind: IPAKind.shared.rawValue)
+        let own = LibraryGame(titleID: "0100000000010000", name: "One game", ipaPath: ipa.path, ipaKind: IPAKind.oneGame.rawValue)
+        XCTAssertEqual(added.statusKey, "library.inSharedApp")
+        XCTAssertEqual(exported.statusKey, "library.needsGameData", "exported before the data was recorded: none on this Mac")
+        XCTAssertEqual(own.statusKey, "library.exportedIPA", "one game's own IPA holds its data")
+
+        try FileManager.default.removeItem(at: archive)
+        XCTAssertTrue(added.needsGameData)
+        XCTAssertEqual(added.statusKey, "library.needsGameData")
+        let onDrive = LibraryGame(titleID: "1", name: "On a drive", addedToSharedApp: true, archivePath: "/Volumes/NoSuchDrive-\(UUID().uuidString)/games/1")
+        XCTAssertFalse(onDrive.needsGameData, "a drive that is not connected may come back")
+
+        try JSONEncoder().encode([added]).write(to: file)
+        let library = GameLibrary(file: file)
+        library.pruneMissingPaths()
+        XCTAssertEqual(GameLibrary(file: file).games.first?.archivePath, "", "the deleted folder is forgotten")
+        XCTAssertEqual(GameLibrary(file: file).games.first?.statusKey, "library.needsGameData")
     }
 
     func testEveryLanguageNamesAnExportedIPA() {

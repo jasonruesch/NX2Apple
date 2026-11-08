@@ -268,7 +268,8 @@ extension LauncherView {
 
     func status(_ game: LibraryGame, prominent: Bool = false) -> some View {
         let building = m.running && activeBuildID == game.id
-        let color = building ? LauncherPalette.building : ((game.isReady || game.hasIOSBuild || game.addedToSharedApp) ? LauncherPalette.ready : LauncherPalette.unbuilt)
+        let color = building || (!game.isReady && game.needsGameData) ? LauncherPalette.building
+            : ((game.isReady || game.hasIOSBuild || game.addedToSharedApp) ? LauncherPalette.ready : LauncherPalette.unbuilt)
         let key = building ? "library.building" : game.statusKey
         return HStack(spacing: 7) {
             Circle().fill(color).frame(width: prominent ? 9 : 7, height: prominent ? 9 : 7)
