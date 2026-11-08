@@ -181,7 +181,7 @@ struct LauncherView: View {
                 SharedAppPage(build: m, devices: devices, library: library, onNewBuild: newBuild, onViewGame: { page = .library })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                CardPages(settings: page == .settings, queue: queue, onShowQueued: showQueued, onStartQueue: startQueue, onOpenSharedApp: { page = .iphone }, build: m, updates: updates, repo: repo, engine: engine, dependencies: stores.dependencies, devices: devices,
+                CardPages(settings: page == .settings, queue: queue, onShowQueued: showQueued, onStartQueue: startQueue, onBuildQueued: buildQueued, onOpenSharedApp: { page = .iphone }, build: m, updates: updates, repo: repo, engine: engine, dependencies: stores.dependencies, devices: devices,
                           library: library, diagnostics: stores.diagnostics, onViewGame: { page = .library }, onOpenSettings: { page = .settings },
                           onChooseLibraryFolder: chooseLibraryFolder, onOpenControls: { controlsOpen = true }, onOpenControllers: { controllerSheet = true }, onRunSetup: onRunSetup, controlChanges: controls.changeCount,
                           padMerge: Binding(get: { controls.padMerge }, set: { setPadMerge($0) }))
@@ -551,6 +551,7 @@ struct LauncherView: View {
 
     func newBuild() {
         guard !m.running else { page = .builds; return }
+        queue.stepAside()   // one game: a waiting batch steps aside (LauncherView+Queue.swift)
         m.leaveGameFolder()
         for index in m.slots.indices { m.slots[index].paths = []; m.slots[index].problem = "" }
         m.gameDir = ""; m.done = false; m.doneNote = ""; m.macAppPath = ""; m.stages = []
@@ -558,8 +559,11 @@ struct LauncherView: View {
         page = .builds
     }
 
-    func configureBuild(_ game: LibraryGame) {
+    /// Sets up the Builds page for one game, as Build again does. From the library, a waiting batch steps aside; the batch's own
+    /// calls (`fromBatch`) keep it.
+    func configureBuild(_ game: LibraryGame, fromBatch: Bool = false) {
         guard !m.running else { page = .builds; return }
+        if !fromBatch { queue.stepAside() }
         if let folder = game.inputs[GameLibrary.folderInput]?.first {
             m.scan(folder: folder)   // a game folder is read again: its updates and DLC may have changed since
         } else {

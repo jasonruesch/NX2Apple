@@ -43,6 +43,9 @@ import NXCore
     @Published package private(set) var started = false
     /// The game whose files the Builds page shows while the batch is prepared.
     @Published package private(set) var selectedID: UUID?
+    /// A batch that does not run is set aside while the player builds one game from the library: the Builds page shows that game
+    /// alone, with a line to bring the batch back.
+    @Published package private(set) var setAside = false
 
     /// Sets up the build of the game with this id for this target and starts it.
     package var start: (_ id: UUID, _ target: String) -> Start = { _, _ in .skipped("") }
@@ -51,47 +54,78 @@ import NXCore
 
     /// A game is building, or more wait in a batch that runs.
     package var isActive: Bool { started && entries.contains { $0.state == .building || $0.state == .waiting } }
-    /// Games wait for the player to start the batch.
-    package var isPrepared: Bool { !started && entries.contains { $0.state == .waiting } }
+    /// The batch is there and nothing of it runs: before its first run, and after a run (each game keeps its last result). Its games
+    /// can be shown, built one at a time, taken out, or all built again.
+    package var isPrepared: Bool { !started && building == nil && !entries.isEmpty }
+    /// The batch ran at least once: the button rebuilds it.
+    package var hasResults: Bool { entries.contains { $0.state.isFinished } }
     package var waitingCount: Int { entries.filter { $0.state == .waiting }.count }
     package var building: Entry? { entries.first { $0.state == .building } }
     package var finishedCount: Int { entries.filter(\.state.isFinished).count }
 
-    /// Adds the games in this order (one already waiting or building is not added twice). With `start`, the batch runs and the first
-    /// game starts if nothing builds; without it, the games wait for `startAll` while the player checks their files.
+    /// Adds the games in this order. A batch that does not run is replaced by the new one; a running batch gets them at its end (a
+    /// game already waiting or building is not added twice). With `start`, the batch runs at once; without it, the games wait for
+    /// `startAll` while the player checks their files.
     package func enqueue(_ games: [(id: UUID, name: String)], target: String, buildRunning: Bool, start: Bool = true) {
-        if !isActive { entries.removeAll { $0.state.isFinished } }   // a new batch: the last one's results go
+        if !isActive { entries.removeAll { $0.state != .building }; selectedID = nil }
         for game in games where !entries.contains(where: { $0.id == game.id && !$0.state.isFinished }) {
             entries.removeAll { $0.id == game.id }
             entries.append(Entry(id: game.id, name: game.name, target: target))
         }
-        if start { startAll(buildRunning: buildRunning) } else if selectedID == nil { selectedID = entries.first { $0.state == .waiting }?.id }
+        setAside = false
+        if start { startAll(buildRunning: buildRunning) } else if selectedID == nil { selectedID = entries.first?.id }
     }
 
-    /// Starts the batch from its first waiting game, whichever game the Builds page shows.
+    /// The player builds one game from the library: a batch that does not run steps aside (it stays, with its results).
+    package func stepAside() { if isPrepared { setAside = true } }
+
+    /// The batch takes the Builds page again.
+    package func bringBack() { setAside = false }
+
+    /// The batch is on the Builds page: it runs, or it waits and is not set aside.
+    package var isShown: Bool { !entries.isEmpty && (!isPrepared || !setAside) }
+
+    /// Builds every game of the batch, from the first, whichever game the Builds page shows. A batch that ran before runs again:
+    /// each game's last result gives way.
     package func startAll(buildRunning: Bool = false) {
-        guard entries.contains(where: { $0.state == .waiting }) else { return }
+        guard isPrepared || entries.contains(where: { $0.state == .waiting }) else { return }
+        for index in entries.indices where entries[index].state != .building { entries[index].state = .waiting }
         started = true
+        setAside = false
         selectedID = nil
         if !buildRunning { next() }
     }
 
-    /// The game whose files the Builds page shows, while the batch is prepared.
+    /// Builds one game of the batch on its own (after its files were changed, say). The others keep their results and stay.
+    package func runOne(_ id: UUID) {
+        guard isPrepared, let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        let before = entries[index].state
+        entries[index].state = .building
+        selectedID = id
+        setAside = false
+        switch start(id, entries[index].target) {
+        case .started: return
+        case .busy: entries[index].state = before
+        case .skipped(let why): entries[index].state = .skipped(why)
+        }
+    }
+
+    /// The game whose files the Builds page shows, while nothing of the batch runs.
     package func select(_ id: UUID) {
-        guard !started, entries.contains(where: { $0.id == id && $0.state == .waiting }) else { return }
+        guard isPrepared, entries.contains(where: { $0.id == id }) else { return }
         selectedID = id
     }
 
-    /// The target a waiting game builds for (the player changed it while checking its files).
+    /// The target a game builds for (the player changed it while its files were shown).
     package func setTarget(_ target: String, for id: UUID) {
-        guard let index = entries.firstIndex(where: { $0.id == id && $0.state == .waiting }) else { return }
+        guard let index = entries.firstIndex(where: { $0.id == id && $0.state != .building }) else { return }
         entries[index].target = target
     }
 
-    /// Takes a waiting game out of the batch.
+    /// Takes a game out of the batch, while nothing of it runs (or a game that only waits, while it runs).
     package func remove(_ id: UUID) {
-        entries.removeAll { $0.id == id && $0.state == .waiting }
-        if selectedID == id { selectedID = entries.first { $0.state == .waiting }?.id }
+        entries.removeAll { $0.id == id && (isPrepared ? $0.state != .building : $0.state == .waiting) }
+        if selectedID == id { selectedID = entries.first?.id }
         if !entries.contains(where: { $0.state == .waiting || $0.state == .building }) { started = false }
     }
 
@@ -109,9 +143,9 @@ import NXCore
         }
     }
 
-    /// The build of the game `id` ended: done, or failed with the build's note. The next game starts. An end for another game (a
-    /// build the player started themselves, or a second report of one that ended already) changes no entry, and only lets a game
-    /// that waited for that build start.
+    /// The build of the game `id` ended: done, or failed with the build's note. In a running batch the next game starts. An end for
+    /// another game (a build the player started themselves, or a second report of one that ended already) changes no entry, and
+    /// only lets a game that waited for that build start.
     package func buildEnded(id: UUID?, ok: Bool, note: String) {
         if let id, let index = entries.firstIndex(where: { $0.id == id && $0.state == .building }) {
             entries[index].state = ok ? .done : .failed(note)
@@ -126,6 +160,12 @@ import NXCore
         if building == nil { started = false }
     }
 
-    /// Forgets the games that are finished.
-    package func clearFinished() { entries.removeAll { $0.state.isFinished } }
+    /// Ends the batch: the Builds page builds one game again.
+    package func clear() {
+        guard building == nil else { return }
+        setAside = false
+        entries = []
+        started = false
+        selectedID = nil
+    }
 }

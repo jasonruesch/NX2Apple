@@ -39,10 +39,17 @@ extension LauncherView {
         guard !m.running, let game = library.games.first(where: { $0.id == id }),
               let entry = queue.entries.first(where: { $0.id == id }) else { return }
         saveShownQueued()
-        configureBuild(game)
+        configureBuild(game, fromBatch: true)
         m.target = entry.target
         fillKnownKeys()
         queue.select(id)
+    }
+
+    /// One batch game built on its own: the files shown are saved first (they may be this game's, just changed), then it builds.
+    func buildQueued(_ id: UUID) {
+        guard !m.running else { return }
+        saveShownQueued()
+        queue.runOne(id)
     }
 
     /// The Build games button: saves the files shown, then starts the batch from its first game.
@@ -53,7 +60,7 @@ extension LauncherView {
 
     /// The files and target on the Builds page belong to the batch game it shows: kept in the library for that game's build.
     private func saveShownQueued() {
-        guard let shown = queue.selectedID, !m.basePath.isEmpty else { return }
+        guard queue.isShown, let shown = queue.selectedID, !m.basePath.isEmpty else { return }   // set aside: the page shows another game
         _ = library.rememberInputs(m)
         queue.setTarget(m.target, for: shown)
     }
@@ -73,7 +80,7 @@ extension LauncherView {
         guard !m.running else { return .busy }   // it starts when the running build ends
         let hasFiles = game.inputs[GameLibrary.folderInput]?.isEmpty == false || game.inputs["base", default: []].isEmpty == false
         guard hasFiles else { return .skipped(loc.t("queue.noFiles")) }
-        configureBuild(game)
+        configureBuild(game, fromBatch: true)
         m.target = target
         fillKnownKeys()
         guard m.canBuild else { return .skipped(skipReason) }

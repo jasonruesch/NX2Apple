@@ -22,7 +22,7 @@ import XCTest
         queue.buildEnded(id: c, ok: true, note: "")
         XCTAssertFalse(queue.isActive)
         XCTAssertEqual(queue.finishedCount, 3)
-        queue.clearFinished()
+        queue.clear()
         XCTAssertTrue(queue.entries.isEmpty)
     }
 
@@ -105,6 +105,72 @@ import XCTest
         XCTAssertEqual(started.last?.1, "mac-app", "the target set while its files were shown")
         queue.buildEnded(id: c, ok: true, note: "")
         XCTAssertFalse(queue.started, "the batch has finished")
+        XCTAssertTrue(queue.isPrepared, "it stays, with each game's result, to be changed and built again")
+        XCTAssertTrue(queue.hasResults)
+    }
+
+    /// After a run, a failed game can be shown, built on its own, and the whole batch built again.
+    func testAFinishedBatchCanBuildOneGameAgainOrAllOfThem() {
+        let queue = BuildQueue()
+        var started: [UUID] = []
+        queue.start = { id, _ in started.append(id); return .started }
+        queue.enqueue([(a, "A"), (b, "B")], target: "ios", buildRunning: false)
+        queue.buildEnded(id: a, ok: true, note: "")
+        queue.buildEnded(id: b, ok: false, note: "wrong file")
+        XCTAssertEqual(queue.entries.map(\.state), [.done, .failed("wrong file")])
+
+        queue.select(b)
+        XCTAssertEqual(queue.selectedID, b)
+        queue.runOne(b)
+        XCTAssertEqual(started, [a, b, b])
+        XCTAssertEqual(queue.entries.map(\.state), [.done, .building], "A keeps its result")
+        XCTAssertFalse(queue.isPrepared, "nothing else starts while it builds")
+        queue.buildEnded(id: b, ok: true, note: "")
+        XCTAssertEqual(queue.entries.map(\.state), [.done, .done])
+        XCTAssertEqual(started.count, 3, "a single build does not start the others")
+
+        queue.startAll()
+        XCTAssertEqual(started.last, a, "Rebuild games starts from the first")
+        XCTAssertEqual(queue.entries.map(\.state), [.building, .waiting])
+        queue.buildEnded(id: a, ok: true, note: "")
+        queue.buildEnded(id: b, ok: true, note: "")
+        queue.clear()
+        XCTAssertTrue(queue.entries.isEmpty)
         XCTAssertFalse(queue.isPrepared)
+    }
+
+    /// A single build that finds another build running leaves the game as it was.
+    func testASingleBuildWhileAnotherRunsChangesNothing() {
+        let queue = BuildQueue()
+        queue.start = { _, _ in .started }
+        queue.enqueue([(a, "A")], target: "ios", buildRunning: false)
+        queue.buildEnded(id: a, ok: false, note: "x")
+        queue.start = { _, _ in .busy }
+        queue.runOne(a)
+        XCTAssertEqual(queue.entries.first?.state, .failed("x"))
+    }
+
+    /// One game built from the library sets a waiting batch aside; it comes back with its results, and building it shows it again.
+    func testASingleBuildFromTheLibrarySetsAWaitingBatchAside() {
+        let queue = BuildQueue()
+        queue.start = { _, _ in .started }
+        queue.enqueue([(a, "A"), (b, "B")], target: "ios", buildRunning: false, start: false)
+        XCTAssertTrue(queue.isShown)
+        queue.stepAside()
+        XCTAssertFalse(queue.isShown, "the Builds page shows the one game")
+        XCTAssertTrue(queue.isPrepared, "the batch is still there")
+        queue.bringBack()
+        XCTAssertTrue(queue.isShown)
+
+        queue.startAll()
+        queue.stepAside()
+        XCTAssertTrue(queue.isShown, "a running batch is never set aside")
+        queue.buildEnded(id: a, ok: true, note: "")
+        queue.buildEnded(id: b, ok: true, note: "")
+        queue.stepAside()
+        queue.runOne(a)
+        XCTAssertTrue(queue.isShown, "building a game of the batch brings it back")
+        queue.enqueue([(c, "C")], target: "ios", buildRunning: true, start: false)
+        XCTAssertTrue(queue.isShown)
     }
 }

@@ -13,6 +13,7 @@ struct CardPages: View {
     var queue: BuildQueue?
     var onShowQueued: (UUID) -> Void = { _ in }
     var onStartQueue: () -> Void = {}
+    var onBuildQueued: (UUID) -> Void = { _ in }
     var onOpenSharedApp: () -> Void = {}
     @ObservedObject var build: BuildStore   // for the drop target (off while a build runs) and the two cards that need to know
     let updates: AppUpdateStore
@@ -42,7 +43,7 @@ struct CardPages: View {
                              onOpenControllers: onOpenControllers, onRunSetup: onRunSetup, controlChanges: controlChanges, padMerge: padMerge)
             } else {
                 BuildPage(build: build, running: build.running, repo: repo, dependencies: dependencies, devices: devices, extrasOpen: $extrasOpen, logOpen: $logOpen,
-                          queue: queue, onShowQueued: onShowQueued, onStartQueue: onStartQueue, onViewGame: onViewGame, onOpenSettings: onOpenSettings, onOpenSharedApp: onOpenSharedApp)
+                          queue: queue, onShowQueued: onShowQueued, onStartQueue: onStartQueue, onBuildQueued: onBuildQueued, onViewGame: onViewGame, onOpenSettings: onOpenSettings, onOpenSharedApp: onOpenSharedApp)
             }
         }
         .modifier(GameFilesDrop(enabled: !settings && !build.running, label: loc.t("drop.hint")) { build.take(dropped: $0) })   // DropFiles.swift

@@ -26,7 +26,7 @@ package struct ActionCard: View {
         self.onStartQueue = onStartQueue
     }
 
-    private var batch: Bool { queue.isPrepared && !build.running }
+    private var batch: Bool { queue.isPrepared && queue.isShown && !build.running }
     private var enabled: Bool { batch ? dependencies.allPresent && repo.isRepo : (build.running || build.canBuild) }
 
     package var body: some View {
@@ -36,7 +36,7 @@ package struct ActionCard: View {
             Button {
                 if batch { onStartQueue() } else if build.running { build.stop() } else { build.startBuild() }
             } label: {
-                Label(batch ? String(format: loc.t("queue.buildAll"), queue.waitingCount)
+                Label(batch ? String(format: loc.t(queue.hasResults ? "queue.rebuildAll" : "queue.buildAll"), queue.entries.count)
                         : build.running ? loc.t(build.stopping ? "library.stopping" : "btn.stop") : (build.done ? loc.t("btn.rebuild") : loc.t("build.startGame")),
                       systemImage: build.running ? "stop.fill" : (batch ? "square.stack.3d.up.fill" : "hammer.fill"))
                     .font(.manrope(15, .semibold)).padding(.horizontal, 24).padding(.vertical, 13)

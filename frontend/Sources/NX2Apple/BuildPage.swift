@@ -18,6 +18,7 @@ struct BuildPage: View {
     var queue: BuildQueue?   // the batch the library sent (QueueCard)
     var onShowQueued: (UUID) -> Void = { _ in }   // shows a batch game's files in the cards (LauncherView+Queue.swift)
     var onStartQueue: () -> Void = {}   // the Build games button
+    var onBuildQueued: (UUID) -> Void = { _ in }   // builds one batch game on its own
     @State private var showRunningSetup = false
     var onViewGame: () -> Void = {}
     var onOpenSettings: () -> Void = {}
@@ -26,7 +27,7 @@ struct BuildPage: View {
 
     var body: some View {
         CardPageHeading(loc.t("build.heading"), note: loc.t(running ? (build.target == BuildTarget.mac ? "activity.mac" : "activity.ios") : "build.intro"))
-        if let queue { QueueCard(queue: queue, onSelect: onShowQueued) }
+        if let queue { QueueCard(queue: queue, onSelect: onShowQueued, onBuildOne: onBuildQueued) }
         if running {
             ProgressCard(build: build)
             CardDisclosure(loc.t("section.setup"), detail: build.gameName, isOpen: showRunningSetup) { showRunningSetup.toggle() }
