@@ -556,7 +556,11 @@ final class GameLibrary: ObservableObject {
                 let previousSelection = self.selectedID
                 for source in sources {
                     if var existing = self.games.first(where: { $0.titleID == source.titleID }) {
-                        if existing.inputs["base", default: []].isEmpty { existing.inputs = source.inputs }
+                        if existing.inputs["base", default: []].isEmpty {   // the scan's files; a keys file it did not find (outside the library folder) stays
+                            let keys = existing.inputs["keys", default: []]
+                            existing.inputs = source.inputs
+                            if existing.inputs["keys", default: []].isEmpty, !keys.isEmpty { existing.inputs["keys"] = keys }
+                        }
                         else {
                             // Slots the library has empty and the scan fills: an update or DLC added since, or a game
                             // recorded before the scan climbed out of a "nsp本体" folder (nothing was found beside it then).
