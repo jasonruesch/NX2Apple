@@ -1473,6 +1473,7 @@
   "shared.ipaBundleID": "Bundle ID",
   "shared.ipaBundleIDInvalid": "请使用字母、数字和连字符，至少两段，用点分隔，例如 com.example.games。",
   "shared.ipaBundleIDNote": "留空则保留 %@。使用其他 ID 会安装为单独的 App，拥有自己的游戏数据和存档。",
+  "shared.ipaDeviceNote": "Xcode 会将它加入团队，让 IPA 能安装到它上面。制作 IPA 时请保持连接。",
   "shared.ipaSection": "IPA",
   "shared.ipaSignedNote": "为此团队注册的设备签名。",
   "shared.ipaSigning": "IPA 签名",

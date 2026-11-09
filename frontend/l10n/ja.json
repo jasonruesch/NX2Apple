@@ -1469,6 +1469,7 @@
   "shared.ipaBundleID": "Bundle ID",
   "shared.ipaBundleIDInvalid": "英字、数字、ハイフンを使い、ドットで区切った 2 つ以上の部分にしてください（例: com.example.games）。",
   "shared.ipaBundleIDNote": "空欄のままにすると %@ のままです。別の ID は別のアプリとしてインストールされ、ゲームデータとセーブも別になります。",
+  "shared.ipaDeviceNote": "Xcode がこのデバイスをチームに追加し、IPA をインストールできるようにします。IPA の作成中は接続したままにしてください。",
   "shared.ipaSection": "IPA",
   "shared.ipaSignedNote": "このチームに登録されたデバイス用に署名します。",
   "shared.ipaSigning": "IPA の署名",

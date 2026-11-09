@@ -1472,6 +1472,7 @@
   "shared.ipaBundleID": "Bundle ID",
   "shared.ipaBundleIDInvalid": "Use letters, digits and hyphens, in two or more parts separated by dots, like com.example.games.",
   "shared.ipaBundleIDNote": "Leave it empty to keep %@. Another ID installs as a separate app, with its own game data and saves.",
+  "shared.ipaDeviceNote": "Xcode adds it to the team, so the IPA installs on it. Keep it connected while the IPA is made.",
   "shared.ipaSection": "The IPA",
   "shared.ipaSignedNote": "Signed for the devices registered to this team.",
   "shared.ipaSigning": "IPA signing",

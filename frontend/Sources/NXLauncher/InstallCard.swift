@@ -93,13 +93,19 @@ package struct SharedAppTargetCard: View {
                 }
                 CardDivider()
             }
-            if devices.exportIPA && devices.sendWhere == SendWhere.drive {
+            let toDrive = devices.exportIPA && devices.sendWhere == SendWhere.drive
+            if toDrive {
                 CardRow(loc.t("shared.driveFolder"), detail: devices.driveFolder.isEmpty ? loc.t("shell.driveNone") : build.shortPath(devices.driveFolder),
                         help: devices.driveFolder) {
                     Button(loc.t("shell.driveChoose")) { build.chooseDriveFolder() }
                 }
-            } else {
-                CardRow(loc.t("dev.target"), detail: devices.checked && devices.devices.isEmpty ? loc.t("dev.noDevices") : "") {
+            }
+            // A signed IPA needs the device too, even when its game data goes onto a drive: the export registers it with the team
+            let signedIPA = devices.exportIPA && !devices.ipaTeam.isEmpty
+            if !toDrive || signedIPA {
+                if toDrive { CardDivider() }
+                let detail = devices.checked && devices.devices.isEmpty ? loc.t("dev.noDevices") : signedIPA ? loc.t("shared.ipaDeviceNote") : ""
+                CardRow(loc.t("dev.target"), detail: detail) {
                     RefreshDevicesButton(devices: devices)
                     LauncherDropdown(options: options, selection: devices.installDevice, label: loc.t("dev.target")) { devices.installDevice = $0 }
                 }

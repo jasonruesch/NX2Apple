@@ -1308,6 +1308,7 @@
   "shared.ipaBundleID": "Bundle-ID",
   "shared.ipaBundleIDInvalid": "Använd bokstäver, siffror och bindestreck, i två eller fler delar åtskilda av punkter, som com.example.games.",
   "shared.ipaBundleIDNote": "Lämna tomt för att behålla %@. Ett annat ID installeras som en egen app, med egna speldata och sparfiler.",
+  "shared.ipaDeviceNote": "Xcode lägger till den i teamet så att IPA:n kan installeras på den. Håll den ansluten medan IPA:n skapas.",
   "shared.ipaSection": "IPA-filen",
   "shared.ipaSignedNote": "Signerad för enheterna som är registrerade i det här teamet.",
   "shared.ipaSigning": "Signering av IPA",
