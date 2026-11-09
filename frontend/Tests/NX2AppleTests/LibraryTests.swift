@@ -723,8 +723,11 @@ import NXModel
         let oldDLC = updates.appendingPathComponent("Hades [0100535012975001][v0].nsp")
         for f in [oldBase, oldUpdate, oldDLC] { try Data([0]).write(to: f) }
         let state = temporary.appendingPathComponent("library.json")
+        let keys = temporary.appendingPathComponent("Secrets/prod.keys")   // where the scan does not look (it checks keys/ and the folder itself): it must stay
+        try fm.createDirectory(at: keys.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data([0]).write(to: keys)
         var game = LibraryGame(titleID: titleID, name: "Hades")
-        game.inputs = ["base": [oldBase.path], "update": [oldUpdate.path], "dlc": [oldDLC.path], "keys": []]
+        game.inputs = ["base": [oldBase.path], "update": [oldUpdate.path], "dlc": [oldDLC.path], "keys": [keys.path]]
         try JSONEncoder().encode([game]).write(to: state)
         let library = GameLibrary(file: state)
         library.applicationFolders = []
@@ -745,6 +748,7 @@ import NXModel
         XCTAssertEqual(found.inputs["base"]?.map(Self.canon), [Self.canon(newBase.path)])
         XCTAssertEqual(found.inputs["update"]?.map(Self.canon), [Self.canon(newUpdate.path)])
         XCTAssertEqual(found.inputs["dlc"]?.map(Self.canon), [Self.canon(newDLC.path)])
+        XCTAssertEqual(found.inputs["keys"], [keys.path], "the keys file was not moved: the game keeps it")
     }
 
     /// Base, update and DLC in one folder: the folder is its own game folder and the climb goes no further.
