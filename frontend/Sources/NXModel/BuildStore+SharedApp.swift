@@ -42,8 +42,8 @@ extension BuildStore {
     /// The games in the shared app, when each was built, and when the app was last installed or exported.
     package var sharedApp: SharedAppState { SharedAppState.read(root: shellRoot) }
 
-    /// The page's action can run: nothing else runs, and an install has a device and a team.
-    package var canMakeSharedApp: Bool { !running && (devices.exportIPA || installsDirectly) }
+    /// The page's action can run: nothing else runs, an install has a device and a team, and an export's bundle ID is usable.
+    package var canMakeSharedApp: Bool { !running && (devices.exportIPA ? devices.ipaBundleIDValid : installsDirectly) }
 
     /// Makes the shared app from the games in shell.json: installed on the chosen device (then the game data of `data` the device
     /// lacks), or exported as an IPA, as the page's switch says.

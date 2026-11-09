@@ -448,6 +448,12 @@ package struct ShellInstaller {
     package var banners: URL = BannerCache.directory
     /// A picture the player chose for the game in the library, which wins over the cached banner (nil: none).
     package var pickedArtwork: String? = nil
+    /// The export's signing team: empty makes the unsigned IPA, a team ID makes one signed for that team's devices.
+    package var exportTeam = ""
+    /// The export's bundle ID: empty keeps the one shell.json holds.
+    package var exportBundleID = ""
+    /// The codesign the team-signed export runs (a test points it at a stand-in).
+    package var codesign = "/usr/bin/codesign"
 
     package init(xcrun: String = "/usr/bin/xcrun", repo: String, python: String, root: String, device: String, team: String) {
         self.xcrun = xcrun; self.repo = repo; self.python = python; self.root = root; self.device = device; self.team = team

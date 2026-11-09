@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // The shared app as an unsigned IPA (LNPANDY/NX2Apple#416): no device and no signing team. The same project as the install
 // (build_shell.sh --prepare-xcode), built by xcodebuild with signing off, the executable signed ad-hoc to carry its entitlements
@@ -18,12 +19,50 @@ extension ShellInstall {
     /// The folder the app is copied into as `Payload/<app>.app` before it is zipped.
     package static func exportStage(root: String) -> String { exportFolder(root: root) + "/stage" }
 
-    /// The shell project (prepared by the install's own script call) built for iOS with signing off, as build_shell.sh --build does.
-    /// `bundleID` is the one shell.json holds, so the IPA keeps the identifier of the install.
-    package static func exportBuildCommand(xcrun: String, root: String, bundleID: String) -> [String] {
-        [xcrun, "xcodebuild", "-project", projectFolder(root: root) + "/" + projectName, "-scheme", scheme,
-         "-configuration", "Release", "-destination", "generic/platform=iOS", "-derivedDataPath", exportDerivedData(root: root),
-         "PRODUCT_BUNDLE_IDENTIFIER=\(bundleID)", "CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGN_IDENTITY=", "build"]
+    /// The shell project (prepared by the install's own script call) built for iOS, as build_shell.sh --build does. Without a team,
+    /// signing is off. With one, Xcode signs it for that team and makes a development profile for the devices registered to it.
+    /// `bundleID` is the one shell.json holds unless the player chose another for the IPA.
+    package static func exportBuildCommand(xcrun: String, root: String, bundleID: String, team: String = "") -> [String] {
+        let signing = team.isEmpty ? ["CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGN_IDENTITY="]
+            : ["DEVELOPMENT_TEAM=\(team)"]
+        return [xcrun, "xcodebuild", "-project", projectFolder(root: root) + "/" + projectName, "-scheme", scheme,
+                "-configuration", "Release", "-destination", "generic/platform=iOS", "-derivedDataPath", exportDerivedData(root: root)]
+            + (team.isEmpty ? [] : ["-allowProvisioningUpdates"])
+            + ["PRODUCT_BUNDLE_IDENTIFIER=\(bundleID)"] + signing + ["build"]
+    }
+
+    /// A bundle ID Xcode accepts: two or more parts of letters, digits and hyphens, separated by dots.
+    package static func isValidBundleID(_ id: String) -> Bool {
+        id.range(of: "^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$", options: .regularExpression) != nil
+    }
+
+    /// The bundle ID of the app the last export built, nil before the first export. The data send looks for it on the device.
+    package static func exportedBundleID(root: String) -> String? {
+        let info = NSDictionary(contentsOfFile: exportAppPath(root: root) + "/Info.plist")
+        return (info?["CFBundleIdentifier"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    // ---- the team-signed export: shader packing changes the app after Xcode signed it, so it is signed again the same way ----
+
+    /// Writes the signing certificates of `app` as `<prefix>0`, `<prefix>1`…; the first is the one it was signed with.
+    package static func certificatesCommand(codesign: String, app: String, prefix: String) -> [String] {
+        [codesign, "-d", "--extract-certificates=\(prefix)", app]
+    }
+
+    /// Writes the entitlements `app` was signed with (Xcode's, from the provisioning profile) to `file` as XML.
+    package static func entitlementsDumpCommand(codesign: String, app: String, file: String) -> [String] {
+        [codesign, "-d", "--entitlements", file, "--xml", app]
+    }
+
+    /// Signs `path` with the identity whose certificate has the SHA-1 `identity`, with `entitlements` for the app itself.
+    package static func teamSignCommand(codesign: String, identity: String, entitlements: String?, path: String) -> [String] {
+        [codesign, "--force", "--sign", identity, "--timestamp=none"]
+            + (entitlements.map { ["--entitlements", $0, "--generate-entitlement-der"] } ?? []) + [path]
+    }
+
+    /// codesign names an identity by its certificate's SHA-1, in hex.
+    package static func identityHash(certificate: Data) -> String {
+        Insecure.SHA1.hash(data: certificate).map { String(format: "%02X", $0) }.joined()
     }
 
     /// The entitlements file `build_shell.sh --prepare-xcode` writes into the project (the Increased Memory Limit request).
@@ -127,11 +166,30 @@ extension ShellInstaller {
         let prepared = prepareShell(adding: game)
         guard let library = prepared.library else { return prepared.failure! }
 
-        // The unsigned build, in the export's own derived data
+        // The build, in the export's own derived data: unsigned, or signed for the export's team
+        let signed = !exportTeam.isEmpty
         let buildName = t("shell.exportBuildStage")
         begin(Self.exportBuildStageID, buildName)
-        let built = run(ShellInstall.exportBuildCommand(xcrun: xcrun, root: root, bundleID: library.bundleID), env: nil, label: buildName,
-                        step: BuildProgress.xcodeStep)
+        func build(_ bundleID: String) -> ToolResult {
+            run(ShellInstall.exportBuildCommand(xcrun: xcrun, root: root, bundleID: bundleID, team: exportTeam), env: nil, label: buildName,
+                step: BuildProgress.xcodeStep)
+        }
+        var bundleID = exportBundleID.isEmpty ? library.bundleID : exportBundleID
+        var built = build(bundleID)
+        // The same two retries as the install's signing: the team's own identifier when the default one belongs to another team
+        // (not for an identifier the player chose), and no Increased Memory Limit for a team whose profiles cannot carry it
+        let variant = ShellLibrary.teamVariant(team: exportTeam)
+        if signed, built.status != 0, exportBundleID.isEmpty, bundleID != variant, BuildFailureClassifier.signingTeamTaken(built.output) {
+            log("signing: \(bundleID) is registered to another team, retrying as \(variant)\n")
+            bundleID = variant
+            built = build(bundleID)
+        }
+        if signed, built.status != 0, ShellInstall.memoryCapabilityMissing(built.output), var plain = prepared.env {
+            log("signing: the team's provisioning profile cannot carry the Increased Memory Limit capability; signing without it (a large game may run out of memory)\n")
+            plain["DM_ENTITLEMENTS"] = ""
+            let again = run(ShellInstall.projectCommand(repo: repo), env: plain, label: t("shell.projectStage"), step: { _ in nil })
+            if again.status == 0 { built = build(bundleID) }
+        }
         if built.status != 0 {
             let why = built.lastError ?? fmt("msg.exitCode", built.status)
             end(Self.exportBuildStageID, buildName, ok: false, detail: why)
@@ -143,38 +201,49 @@ extension ShellInstaller {
             return Outcome(ok: false, message: fmt("dev.noProject", app))
         }
         end(Self.exportBuildStageID, buildName, ok: true)
-        return packExport(app: URL(fileURLWithPath: app), library: library, notes: prepared.notes)
+        return packExport(app: URL(fileURLWithPath: app), library: library, notes: prepared.notes, bundleID: bundleID, teamSigned: signed)
     }
 
     /// Stage and zip Payload/<app>.app. Signing can add _CodeSignature/ and CodeResources, so reserve two ZIP32 entries.
-    func packExport(app: URL, library: ShellLibrary, notes: [String] = [], entryLimit: Int = Int(UInt16.max) - 2) -> Outcome {
+    /// `teamSigned`: Xcode signed `app` for a team, and the staged copy is signed again with the same identity and entitlements.
+    func packExport(app: URL, library: ShellLibrary, notes: [String] = [], bundleID: String? = nil, teamSigned: Bool = false,
+                    entryLimit: Int = Int(UInt16.max) - 2) -> Outcome {
         let fm = FileManager.default
         let packName = t("shell.exportPackStage")
         begin(Self.exportPackStageID, packName)
         let stage = ShellInstall.exportStage(root: root), ipa = ShellInstall.ipaPath(root: root)
         let stagedApp = URL(fileURLWithPath: stage + "/Payload/" + ShellInstall.appName)
+        var packed: [URL] = []
         do {
             try? fm.removeItem(atPath: stage)
             try? fm.removeItem(atPath: ipa)
             try fm.createDirectory(atPath: stage + "/Payload", withIntermediateDirectories: true)
             try fm.copyItem(at: app, to: stagedApp)
             if try Self.exceedsEntryLimit(in: stagedApp.deletingLastPathComponent(), limit: entryLimit) {
-                try packShaderLibraries(in: stagedApp, games: library.games, label: packName)
+                packed = try packShaderLibraries(in: stagedApp, games: library.games, label: packName)
             }
         } catch {
             try? fm.removeItem(atPath: stage)
             end(Self.exportPackStageID, packName, ok: false, detail: error.localizedDescription)
             return Outcome(ok: false, message: fmt("shell.exportFailed", error.localizedDescription))
         }
-        // Signing the executable also seals its bundle resources. Sign the staged app after packing the shaders.
-        // Failure only costs the Increased Memory Limit request, so it does not stop the export.
-        let entitlements = ShellInstall.entitlementsPath(root: root)
-        if fm.fileExists(atPath: entitlements) {
-            _ = run(ShellInstall.cleanAttributesCommand(app: stagedApp.path), env: nil, label: packName, step: { _ in nil })
-            let signed = run(ShellInstall.entitlementsCommand(app: stagedApp.path, entitlements: entitlements), env: nil, label: packName, step: { _ in nil })
-            if signed.status != 0 { log("export: the entitlements could not be added to the app (a large game may run out of memory): \(signed.output)\n") }
+        if teamSigned {
+            if let why = signForTeam(built: app.path, staged: stagedApp.path, frameworks: packed.map(\.path), label: packName) {
+                try? fm.removeItem(atPath: stage)
+                end(Self.exportPackStageID, packName, ok: false, detail: why)
+                return Outcome(ok: false, message: fmt("shell.exportFailed", why))
+            }
         } else {
-            log("export: no entitlements file at \(entitlements), the app asks for no Increased Memory Limit\n")
+            // Signing the executable also seals its bundle resources. Sign the staged app after packing the shaders.
+            // Failure only costs the Increased Memory Limit request, so it does not stop the export.
+            let entitlements = ShellInstall.entitlementsPath(root: root)
+            if fm.fileExists(atPath: entitlements) {
+                _ = run(ShellInstall.cleanAttributesCommand(app: stagedApp.path), env: nil, label: packName, step: { _ in nil })
+                let signed = run(ShellInstall.entitlementsCommand(app: stagedApp.path, entitlements: entitlements), env: nil, label: packName, step: { _ in nil })
+                if signed.status != 0 { log("export: the entitlements could not be added to the app (a large game may run out of memory): \(signed.output)\n") }
+            } else {
+                log("export: no entitlements file at \(entitlements), the app asks for no Increased Memory Limit\n")
+            }
         }
         let zipped = run(ShellInstall.zipCommand(root: root), env: nil, label: packName, step: { _ in nil })
         try? fm.removeItem(atPath: stage)
@@ -185,7 +254,7 @@ extension ShellInstaller {
             return Outcome(ok: false, message: fmt("shell.exportFailed", why))
         }
         end(Self.exportPackStageID, packName, ok: true)
-        var outcome = Outcome(ok: true, message: ([fmt("shell.exportDone", ipa)] + notes).joined(separator: "\n"), bundleID: library.bundleID)
+        var outcome = Outcome(ok: true, message: ([fmt("shell.exportDone", ipa)] + notes).joined(separator: "\n"), bundleID: bundleID ?? library.bundleID)
         outcome.ipaPath = ipa
         return outcome
     }
@@ -206,8 +275,10 @@ extension ShellInstaller {
 
     /// Keep a large IPA within the sideloader's 16-bit entry count. Only the games in the shell library
     /// know how to unpack an archive. Leave other frameworks' resources in their original layout.
-    private func packShaderLibraries(in stagedApp: URL, games: [ShellLibrary.Game], label: String) throws {
+    /// Returns the frameworks it changed.
+    private func packShaderLibraries(in stagedApp: URL, games: [ShellLibrary.Game], label: String) throws -> [URL] {
         let fm = FileManager.default
+        var changed: [URL] = []
         let frameworks = stagedApp.appendingPathComponent("Frameworks")
         for game in games {
             let framework = frameworks.appendingPathComponent(URL(fileURLWithPath: game.framework).lastPathComponent)
@@ -227,7 +298,35 @@ extension ShellInstaller {
                 throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: reason])
             }
             try fm.removeItem(at: shaders)
+            changed.append(framework)
         }
+        return changed
+    }
+
+    /// Signs the staged app again as Xcode signed `built`: the same identity (found by its certificate) and the same entitlements,
+    /// the changed `frameworks` first. Returns why it failed, nil when it worked. Unlike the unsigned export's ad-hoc signature, a
+    /// failure stops the export: a team-signed IPA whose signature is broken does not install.
+    private func signForTeam(built: String, staged: String, frameworks: [String], label: String) -> String? {
+        let fm = FileManager.default
+        let work = ShellInstall.exportFolder(root: root) + "/signing"
+        try? fm.removeItem(atPath: work)
+        defer { try? fm.removeItem(atPath: work) }
+        do { try fm.createDirectory(atPath: work, withIntermediateDirectories: true) } catch { return error.localizedDescription }
+        let certificates = run(ShellInstall.certificatesCommand(codesign: codesign, app: built, prefix: work + "/cert"), env: nil, label: label, step: { _ in nil })
+        guard certificates.status == 0, let leaf = fm.contents(atPath: work + "/cert0") else {
+            return certificates.lastError ?? t("shell.exportNoIdentity")
+        }
+        let identity = ShellInstall.identityHash(certificate: leaf), entitlements = work + "/entitlements.plist"
+        let dumped = run(ShellInstall.entitlementsDumpCommand(codesign: codesign, app: built, file: entitlements), env: nil, label: label, step: { _ in nil })
+        guard dumped.status == 0, fm.fileExists(atPath: entitlements) else { return dumped.lastError ?? fmt("msg.exitCode", dumped.status) }
+        _ = run(["/usr/bin/xattr", "-cr", staged], env: nil, label: label, step: { _ in nil })
+        for path in frameworks + [staged] {
+            let signed = run(ShellInstall.teamSignCommand(codesign: codesign, identity: identity, entitlements: path == staged ? entitlements : nil, path: path),
+                             env: nil, label: label, step: { _ in nil })
+            if signed.status != 0 { return signed.lastError ?? fmt("msg.exitCode", signed.status) }
+        }
+        log("export: signed again for the team with identity \(identity)\n")
+        return nil
     }
 
     /// The game data into the shared app that is installed already and signed by another tool (LNPANDY/NX2Apple#416). The app is found
@@ -249,7 +348,7 @@ extension ShellInstaller {
                 unread.dataFailure = .noAppList
                 return unread
             }
-            let found = ShellInstall.shellApps(in: apps)
+            let found = ShellInstall.shellApps(in: apps, exported: ShellInstall.exportedBundleID(root: root))
             guard let first = found.first else {
                 var none = Outcome(ok: false, message: t("shell.sendNoApp"))
                 none.dataFailure = .appNotFound

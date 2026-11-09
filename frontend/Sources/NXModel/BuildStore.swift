@@ -36,6 +36,10 @@ package struct FilePick: Equatable {
     var exportIPA: Bool { get }
     /// An iPhone game build makes the game's own IPA with its game data inside (#540) instead of adding the game to the shared app.
     var exportOneGame: Bool { get }
+    /// The team the shared app's IPA is signed for, empty for an unsigned IPA.
+    var ipaTeam: String { get }
+    /// The bundle ID the player typed for the shared app's IPA, empty for the default.
+    var ipaBundleID: String { get }
     /// The folder the game data is copied to (a drive), empty when none is chosen.
     var driveFolder: String { get set }
     var xcrun: String { get }
@@ -45,6 +49,15 @@ package struct FilePick: Equatable {
     nonisolated func setWaiting(_ on: Bool)
     nonisolated var waitCancelled: Bool { get }
     func copyEnded()
+}
+
+extension InstallTarget {
+    package var ipaTeam: String { "" }
+    package var ipaBundleID: String { "" }
+    /// The IPA's bundle ID as the export uses it: trimmed, empty for the default.
+    package var ipaBundleIDChoice: String { ipaBundleID.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// The chosen bundle ID can be used (an empty one keeps the default).
+    package var ipaBundleIDValid: Bool { ipaBundleIDChoice.isEmpty || ShellInstall.isValidBundleID(ipaBundleIDChoice) }
 }
 
 extension DeviceStore: InstallTarget {}

@@ -74,7 +74,7 @@ package struct SharedAppTargetCard: View {
         }
         let teams = devices.teams.map { (value: $0.id, label: $0.label(personalTeam: loc.t("dev.personalTeam"))) }
         let needsCertificate = devices.teams.first { $0.id == devices.signingTeam }.map { !$0.hasCertificate } ?? false
-        let footnote = devices.exportIPA ? loc.t("shared.exportFootnote")
+        let footnote = devices.exportIPA ? loc.t(devices.ipaTeam.isEmpty ? "shared.exportFootnote" : "shared.exportSignedFootnote")
             : devices.installDevice.isEmpty ? "" : (needsCertificate ? loc.t("dev.teamNoCert") + " " : "") + loc.t("dev.note")
         return CardGroup(loc.t("dev.section"), footnote: footnote) {
             CardRow(loc.t("shell.modeTitle")) {
@@ -84,6 +84,7 @@ package struct SharedAppTargetCard: View {
             }
             CardDivider()
             if devices.exportIPA {
+                ipaRows(teams: teams)
                 // After an export the game data goes to the device the IPA is on, or onto a drive the iPhone reads it from
                 CardRow(loc.t("shared.sendTo")) {
                     LauncherSegmented(options: [(SendWhere.device, loc.t("shell.whereDevice")), (SendWhere.drive, loc.t("shell.whereDrive"))],
@@ -116,5 +117,25 @@ package struct SharedAppTargetCard: View {
         }
         .disabled(build.running)
         .onAppear { if !devices.checked { _ = devices.refresh() } }
+    }
+
+    /// The IPA's signing team (or unsigned, for a sideloading tool) and its bundle ID (empty: the shared app's own).
+    @ViewBuilder private func ipaRows(teams: [(value: String, label: String)]) -> some View {
+        let signing = [(value: "", label: loc.t("shared.ipaUnsigned"))] + teams
+        CardRow(loc.t("shared.ipaSigning"), detail: loc.t(devices.ipaTeam.isEmpty ? "shared.ipaUnsignedNote" : "shared.ipaSignedNote")) {
+            LauncherDropdown(options: signing, selection: devices.ipaTeam, label: loc.t("shared.ipaSigning")) { devices.ipaTeam = $0 }
+        }
+        CardDivider()
+        let current = ShellLibrary.load(root: build.shellRoot).bundleID
+        CardRow(loc.t("shared.ipaBundleID"),
+                detail: devices.ipaBundleIDValid ? String(format: loc.t("shared.ipaBundleIDNote"), current) : loc.t("shared.ipaBundleIDInvalid"),
+                dot: devices.ipaBundleIDValid ? nil : LauncherPalette.building) {
+            TextField(current, text: $devices.ipaBundleID)
+                .textFieldStyle(.roundedBorder).font(.manrope(13))
+                .autocorrectionDisabled()
+                .frame(width: ExportGrid.switchWidth)
+                .accessibilityLabel(loc.t("shared.ipaBundleID"))
+        }
+        CardDivider()
     }
 }
