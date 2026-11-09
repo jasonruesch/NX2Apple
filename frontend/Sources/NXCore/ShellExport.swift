@@ -21,14 +21,22 @@ extension ShellInstall {
 
     /// The shell project (prepared by the install's own script call) built for iOS, as build_shell.sh --build does. Without a team,
     /// signing is off. With one, Xcode signs it for that team and makes a development profile for the devices registered to it.
-    /// `bundleID` is the one shell.json holds unless the player chose another for the IPA.
-    package static func exportBuildCommand(xcrun: String, root: String, bundleID: String, team: String = "") -> [String] {
+    /// Xcode registers a device with the team only when it builds for that device, so a signed build is for `device` when one is
+    /// chosen: the profile then holds it too, and the app still runs on the team's other devices. `bundleID` is the one shell.json
+    /// holds unless the player chose another for the IPA.
+    package static func exportBuildCommand(xcrun: String, root: String, bundleID: String, team: String = "", device: String = "") -> [String] {
+        let destination = !team.isEmpty && !device.isEmpty ? "id=\(device)" : "generic/platform=iOS"
         let signing = team.isEmpty ? ["CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGN_IDENTITY="]
             : ["DEVELOPMENT_TEAM=\(team)"]
         return [xcrun, "xcodebuild", "-project", projectFolder(root: root) + "/" + projectName, "-scheme", scheme,
-                "-configuration", "Release", "-destination", "generic/platform=iOS", "-derivedDataPath", exportDerivedData(root: root)]
+                "-configuration", "Release", "-destination", destination, "-derivedDataPath", exportDerivedData(root: root)]
             + (team.isEmpty ? [] : ["-allowProvisioningUpdates"])
             + ["PRODUCT_BUNDLE_IDENTIFIER=\(bundleID)"] + signing + ["build"]
+    }
+
+    /// xcodebuild's words when the device it was asked to build for is not connected.
+    package static func destinationMissing(_ output: String) -> Bool {
+        output.contains("Unable to find a destination matching") || output.contains("Unable to find a device matching")
     }
 
     /// A bundle ID Xcode accepts: two or more parts of letters, digits and hyphens, separated by dots.
@@ -221,12 +229,19 @@ extension ShellInstaller {
         let signed = !exportTeam.isEmpty
         let buildName = t(signed ? "shell.exportSignedBuildStage" : "shell.exportBuildStage")
         begin(Self.exportBuildStageID, buildName)
+        var target = signed ? device : ""
         func build(_ bundleID: String) -> ToolResult {
-            run(ShellInstall.exportBuildCommand(xcrun: xcrun, root: root, bundleID: bundleID, team: exportTeam), env: nil, label: buildName,
-                step: BuildProgress.xcodeStep)
+            run(ShellInstall.exportBuildCommand(xcrun: xcrun, root: root, bundleID: bundleID, team: exportTeam, device: target), env: nil,
+                label: buildName, step: BuildProgress.xcodeStep)
         }
         var bundleID = exportBundleID.isEmpty ? library.bundleID : exportBundleID
         var built = build(bundleID)
+        // A chosen device that is not connected: build for any device, with the profile of the devices the team already has
+        if !target.isEmpty, built.status != 0, ShellInstall.destinationMissing(built.output) {
+            log("signing: \(deviceName) is not connected, so it cannot be registered with the team; building for the team's registered devices\n")
+            target = ""
+            built = build(bundleID)
+        }
         // The same two retries as the install's signing: the team's own identifier when the default one belongs to another team
         // (not for an identifier the player chose), and no Increased Memory Limit for a team whose profiles cannot carry it
         let variant = ShellLibrary.teamVariant(team: exportTeam)

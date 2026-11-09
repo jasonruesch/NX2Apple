@@ -72,6 +72,9 @@ import NXModel
             if os.path.exists('\(state)/xcode-fails'):
                 print('error: Build input file cannot be found: DmShell.m', flush=True)
                 sys.exit(65)
+            if os.path.exists('\(state)/no-device') and val('-destination').startswith('id='):
+                print('xcodebuild: error: Unable to find a destination matching the provided destination specifier:', flush=True)
+                sys.exit(70)
             if os.path.exists('\(state)/team-taken') and 'PRODUCT_BUNDLE_IDENTIFIER=org.nxnative.shell' in a:
                 print('error: The app identifier "org.nxnative.shell" cannot be registered to your development team.', flush=True)
                 sys.exit(65)
@@ -1193,6 +1196,27 @@ import NXModel
             let expected = L10n.string(team.isEmpty ? "shell.exportBuildStage" : "shell.exportSignedBuildStage", .en)
             XCTAssertTrue(names.list.contains(expected), names.list.joined(separator: ", "))
         }
+    }
+
+    func testASignedExportIsBuiltForTheChosenDeviceSoXcodeRegistersIt() throws {
+        XCTAssertEqual(ShellInstall.exportBuildCommand(xcrun: "/x", root: "/R", bundleID: "b.c", team: "T", device: "DEV-1")[8...9], ["-destination", "id=DEV-1"])
+        XCTAssertEqual(ShellInstall.exportBuildCommand(xcrun: "/x", root: "/R", bundleID: "b.c", device: "DEV-1")[8...9],
+                       ["-destination", "generic/platform=iOS"], "an unsigned build has no team to register the device with")
+        let f = try makeFixture()
+        var i = try signedInstaller(f)
+        i.device = "DEV-1"
+        XCTAssertTrue(i.export(framework: f.framework, titleID: titleID, name: "Test Game").ok)
+        XCTAssertEqual(calls.filter { $0.hasPrefix("xcodebuild") }.map { $0.contains("-destination id=DEV-1") }, [true])
+    }
+
+    func testADeviceThatIsNotConnectedFallsBackToTheTeamsRegisteredDevices() throws {
+        let f = try makeFixture()
+        try write(state + "/no-device", "")
+        var i = try signedInstaller(f)
+        i.device = "DEV-1"
+        let outcome = i.export(framework: f.framework, titleID: titleID, name: "Test Game")
+        XCTAssertTrue(outcome.ok, outcome.message)
+        XCTAssertEqual(calls.filter { $0.hasPrefix("xcodebuild") }.map { $0.contains("-destination generic/platform=iOS") }, [false, true])
     }
 
     func testASignedExportSignsTheFrameworksWhoseShadersItPacked() throws {
