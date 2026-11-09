@@ -1181,6 +1181,20 @@ import NXModel
         XCTAssertEqual(ShellLibrary.load(root: f.root).bundleID, ShellLibrary.defaultBundleID, "the IPA's ID does not change the install's")
     }
 
+    func testTheBuildStageSaysWhetherTheIPAIsSigned() throws {
+        final class Names: @unchecked Sendable { var list: [String] = [] }
+        let f = try makeFixture()
+        for team in ["", "ABCDE12345"] {
+            let names = Names()
+            var i = try signedInstaller(f)
+            i.exportTeam = team
+            i.stage = { names.list.append($0.name) }
+            XCTAssertTrue(i.export(framework: f.framework, titleID: titleID, name: "Test Game").ok)
+            let expected = L10n.string(team.isEmpty ? "shell.exportBuildStage" : "shell.exportSignedBuildStage", .en)
+            XCTAssertTrue(names.list.contains(expected), names.list.joined(separator: ", "))
+        }
+    }
+
     func testASignedExportSignsTheFrameworksWhoseShadersItPacked() throws {
         let f = try makeFixture(entitlements: false)
         try write(ShellInstall.exportAppPath(root: f.root) + "/Frameworks/DmGame\(titleID).framework/msl/b-test/shader.json", "reflection")

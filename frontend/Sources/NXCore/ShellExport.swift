@@ -168,7 +168,7 @@ extension ShellInstaller {
 
         // The build, in the export's own derived data: unsigned, or signed for the export's team
         let signed = !exportTeam.isEmpty
-        let buildName = t("shell.exportBuildStage")
+        let buildName = t(signed ? "shell.exportSignedBuildStage" : "shell.exportBuildStage")
         begin(Self.exportBuildStageID, buildName)
         func build(_ bundleID: String) -> ToolResult {
             run(ShellInstall.exportBuildCommand(xcrun: xcrun, root: root, bundleID: bundleID, team: exportTeam), env: nil, label: buildName,

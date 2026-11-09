@@ -131,7 +131,7 @@ struct SharedAppPage: View {
     }
 
     private var makeNote: String {
-        if export { return String(format: loc.t("shared.makeExportNote"), state.games.count) }
+        if export { return String(format: loc.t(devices.ipaTeam.isEmpty ? "shared.makeExportNote" : "shared.makeExportSignedNote"), state.games.count) }
         guard build.installsDirectly else { return loc.t("shell.needsDevice") }
         return String(format: loc.t("shared.makeInstallNote"), state.games.count, devices.deviceName(devices.installDevice))
     }
