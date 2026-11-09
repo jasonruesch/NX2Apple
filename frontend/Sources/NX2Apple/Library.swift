@@ -354,9 +354,10 @@ final class GameLibrary: ObservableObject {
         VolumePath.onUnmounted(path, volumes: volumes)
     }
 
-    /// Forgets a remembered Mac app, IPA or iOS app that is gone from disk, so nothing points at it. A file on a drive that is not
+    /// Forgets a remembered Mac app, IPA or iOS app that is gone from disk, so nothing points at it, and a game file (base, update,
+    /// DLC, keys) that was moved or renamed, so the next scan fills its slot from where it is now. A file on a drive that is not
     /// connected is kept (the game is just not ready until the drive is back); one missing from a mounted volume is cleared. Saves only
-    /// when something changed; run on load and after a scan, never from a view.
+    /// when something changed; run on load and before and after a scan, never from a view.
     func pruneMissingPaths(volumes: String = "/Volumes") {
         let fm = FileManager.default
         func gone(_ path: String, plist: Bool = false) -> Bool {
@@ -369,6 +370,9 @@ final class GameLibrary: ObservableObject {
             if gone(game.ipaPath) { games[index].ipaPath = ""; changed = true }
             if gone(game.archivePath) { games[index].archivePath = ""; changed = true }   // the game data's build folder was deleted
             if gone(game.iosAppPath, plist: true) { games[index].iosAppPath = ""; games[index].installedDevice = ""; changed = true }
+            for (slot, paths) in game.inputs where paths.contains(where: { gone($0) }) {
+                games[index].inputs[slot] = paths.filter { !gone($0) }; changed = true
+            }
         }
         if changed { save() }
     }
@@ -548,6 +552,7 @@ final class GameLibrary: ObservableObject {
             let apps = Self.builtApps(in: root) + Self.installedApps(in: installed)
             let sources = Self.sourceGames(in: root, repo: repo)
             DispatchQueue.main.async {
+                self.pruneMissingPaths()   // a game file moved or renamed since: its slot is empty, so the scan below fills it
                 let previousSelection = self.selectedID
                 for source in sources {
                     if var existing = self.games.first(where: { $0.titleID == source.titleID }) {
