@@ -47,7 +47,7 @@ struct SharedAppPage: View {
                         OutcomeCard(build: build, devices: devices, onViewGame: onViewGame)
                     }
                 }
-                if export, let ipa = exportedIPA {
+                if export, !making, let ipa = exportedIPA {   // not while the export writes it: the file grows as it is packed
                     ipaCard(ipa)
                     SharedDataCard(build: build, devices: devices, games: entries)
                 }
