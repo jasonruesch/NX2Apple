@@ -73,6 +73,25 @@ import XCTest
         XCTAssertEqual(none.signingTeam, "", "no team at all clears it")
     }
 
+    func testTheIPAsTeamAndBundleIDAreSavedAndAGoneTeamMakesItUnsignedAgain() async {
+        let store = makeStore()
+        XCTAssertEqual(store.ipaTeam, "", "unsigned until the player picks a team")
+        store.ipaTeam = freeTeam.id
+        store.ipaBundleID = " com.example.games "
+        XCTAssertEqual(store.ipaBundleIDChoice, "com.example.games")
+        XCTAssertTrue(store.ipaBundleIDValid)
+        let again = makeStore()
+        XCTAssertEqual(again.ipaTeam, freeTeam.id)
+        XCTAssertEqual(again.ipaBundleID, " com.example.games ")
+        again.ipaBundleID = "games"
+        XCTAssertFalse(again.ipaBundleIDValid)
+        again.ipaBundleID = ""
+        XCTAssertTrue(again.ipaBundleIDValid, "empty keeps the shared app's own ID")
+        again.ipaTeam = "GONE000000"
+        await again.refresh().value
+        XCTAssertEqual(again.ipaTeam, "", "not another team: the IPA goes back to unsigned")
+    }
+
     func testTheChosenDeviceAndTeamAreSavedAndComeBack() {
         let store = makeStore()
         store.installDevice = "UDID-1"

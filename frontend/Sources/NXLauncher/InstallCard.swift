@@ -51,6 +51,7 @@ package struct InstallCard: View {
                         .frame(width: ExportGrid.switchWidth)
                 }
                 CardDivider()
+                if !devices.exportOneGame { ipaRows(teams: teams) }
                 ExportSteps(build: build, devices: devices)
             } else {
                 CardRow(loc.t("dev.target"), detail: devices.checked && devices.devices.isEmpty ? loc.t("dev.noDevices") : "") {
@@ -78,5 +79,25 @@ package struct InstallCard: View {
         devices.exportOneGame = oneGame
         build.exportedIPAPath = ""
         build.send = .idle
+    }
+
+    /// The IPA's signing team (or unsigned, for a sideloading tool) and its bundle ID (empty: the shared app's own).
+    @ViewBuilder private func ipaRows(teams: [(value: String, label: String)]) -> some View {
+        let signing = [(value: "", label: loc.t("shared.ipaUnsigned"))] + teams
+        CardRow(loc.t("shared.ipaSigning"), detail: loc.t(devices.ipaTeam.isEmpty ? "shared.ipaUnsignedNote" : "shared.ipaSignedNote")) {
+            LauncherDropdown(options: signing, selection: devices.ipaTeam, label: loc.t("shared.ipaSigning")) { devices.ipaTeam = $0 }
+        }
+        CardDivider()
+        let current = ShellLibrary.load(root: build.shellRoot).bundleID
+        CardRow(loc.t("shared.ipaBundleID"),
+                detail: devices.ipaBundleIDValid ? String(format: loc.t("shared.ipaBundleIDNote"), current) : loc.t("shared.ipaBundleIDInvalid"),
+                dot: devices.ipaBundleIDValid ? nil : LauncherPalette.building) {
+            TextField(current, text: $devices.ipaBundleID)
+                .textFieldStyle(.roundedBorder).font(.manrope(13))
+                .autocorrectionDisabled()
+                .frame(width: ExportGrid.switchWidth)
+                .accessibilityLabel(loc.t("shared.ipaBundleID"))
+        }
+        CardDivider()
     }
 }

@@ -30,9 +30,10 @@ extension ShellInstall {
     /// The shared app's bundle ID. A sideloading tool may append a team ID or put a prefix before it.
     package static let shellBundlePrefix = ShellLibrary.defaultBundleID
 
-    /// The copies of the shared app among a device's apps, by bundle ID so the order does not change between looks.
-    package static func shellApps(in apps: [InstalledApp]) -> [InstalledApp] {
-        apps.filter { $0.bundle.hasPrefix(shellBundlePrefix) }.sorted { $0.bundle < $1.bundle }
+    /// The copies of the shared app among a device's apps, by bundle ID so the order does not change between looks. `exported` is
+    /// the bundle ID the last export gave the app, which the player may have chosen and need not start with the prefix.
+    package static func shellApps(in apps: [InstalledApp], exported: String? = nil) -> [InstalledApp] {
+        apps.filter { $0.bundle.hasPrefix(shellBundlePrefix) || $0.bundle == exported }.sorted { $0.bundle < $1.bundle }
     }
 
     /// Why the game data could not be put into the app.

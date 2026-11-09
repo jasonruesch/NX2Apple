@@ -344,6 +344,12 @@ package struct ShellInstaller {
     /// (`ShellDataParts`). A test makes them small.
     package var partSize: Int64 = ShellDataParts.partSize
     package var singleCopyLimit: Int64 = ShellDataParts.singleCopyLimit()
+    /// The export's signing team: empty makes the unsigned IPA, a team ID makes one signed for that team's devices.
+    package var exportTeam = ""
+    /// The export's bundle ID: empty keeps the one shell.json holds.
+    package var exportBundleID = ""
+    /// The codesign the team-signed export runs (a test points it at a stand-in).
+    package var codesign = "/usr/bin/codesign"
 
     package init(xcrun: String = "/usr/bin/xcrun", repo: String, python: String, root: String, device: String, team: String) {
         self.xcrun = xcrun; self.repo = repo; self.python = python; self.root = root; self.device = device; self.team = team

@@ -36,6 +36,10 @@ package struct FilePick: Equatable {
     var exportIPA: Bool { get }
     /// The export makes one game's own IPA with its game data inside (#540).
     var exportOneGame: Bool { get }
+    /// The team the shared app's IPA is signed for, empty for an unsigned IPA.
+    var ipaTeam: String { get }
+    /// The bundle ID the player typed for the shared app's IPA, empty for the default.
+    var ipaBundleID: String { get }
     /// The folder the game data is copied to (a drive), empty when none is chosen.
     var driveFolder: String { get set }
     var xcrun: String { get }
@@ -51,6 +55,12 @@ package struct FilePick: Equatable {
 
 extension InstallTarget {
     package func refreshDevices() async {}
+    package var ipaTeam: String { "" }
+    package var ipaBundleID: String { "" }
+    /// The IPA's bundle ID as the export uses it: trimmed, empty for the default.
+    package var ipaBundleIDChoice: String { ipaBundleID.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// The chosen bundle ID can be used (an empty one keeps the default).
+    package var ipaBundleIDValid: Bool { ipaBundleIDChoice.isEmpty || ShellInstall.isValidBundleID(ipaBundleIDChoice) }
 }
 
 extension DeviceStore: InstallTarget {
@@ -321,8 +331,8 @@ func hop(_ body: @escaping @MainActor () -> Void) {
     }
 
     /// A build may start: the repository is usable, the base game and the keys are there (a game folder needs no keys), the tools
-    /// are all present and none runs.
-    package var canBuild: Bool { repo.isRepo && inputsReady && deps.allPresent && !running }
+    /// are all present and none runs, and a shared IPA's bundle ID is usable.
+    package var canBuild: Bool { repo.isRepo && inputsReady && deps.allPresent && !running && (!exportsShell || exportsOneGame || devices.ipaBundleIDValid) }
 
     /// A line for the build card's note, from a store that has no card of its own (the dependency store's failed install).
     package func note(_ text: String) { doneNote = text }

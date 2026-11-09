@@ -28,6 +28,8 @@ package enum SendWhere {
     nonisolated package static let oneGameKey = "exportOneGame"
     nonisolated package static let sendWhereKey = "sendWhere"
     nonisolated package static let driveFolderKey = "driveFolder"
+    nonisolated package static let ipaTeamKey = "ipaTeam"
+    nonisolated package static let ipaBundleIDKey = "ipaBundleID"
 
     @Published package var devices: [AppleDevice] = []
     @Published package var teams: [SigningTeam] = []
@@ -56,6 +58,14 @@ package enum SendWhere {
     /// The folder (a drive) the game data is copied to. Saved when it changes.
     @Published package var driveFolder: String {
         didSet { defaults.set(driveFolder, forKey: Self.driveFolderKey) }
+    }
+    /// The team the shared app's IPA is signed for. Empty: the IPA is unsigned, for a sideloading tool to sign. Saved when it changes.
+    @Published package var ipaTeam: String {
+        didSet { defaults.set(ipaTeam, forKey: Self.ipaTeamKey) }
+    }
+    /// The bundle ID the shared app's IPA gets. Empty: the one shell.json holds. Saved when it changes.
+    @Published package var ipaBundleID: String {
+        didSet { defaults.set(ipaBundleID, forKey: Self.ipaBundleIDKey) }
     }
     /// The shared app's copy question: the size and the connection (nil: none is up).
     @Published package private(set) var shellCopy: ShellCopyPlan?
@@ -88,6 +98,8 @@ package enum SendWhere {
         self.exportOneGame = defaults.bool(forKey: Self.oneGameKey)
         self.sendWhere = defaults.string(forKey: Self.sendWhereKey) ?? SendWhere.device
         self.driveFolder = defaults.string(forKey: Self.driveFolderKey) ?? ""
+        self.ipaTeam = defaults.string(forKey: Self.ipaTeamKey) ?? ""
+        self.ipaBundleID = defaults.string(forKey: Self.ipaBundleIDKey) ?? ""
     }
 
     /// A device's name for a message, "iPhone" when this Mac has not listed it.
@@ -101,6 +113,8 @@ package enum SendWhere {
             let (devices, teams) = await Task.detached(priority: .userInitiated) { (list(xcrun), teamsOf()) }.value
             self.devices = devices; self.teams = teams; self.checked = true
             if !teams.contains(where: { $0.id == self.signingTeam }) { self.signingTeam = teams.first?.id ?? "" }
+            // A team the Mac no longer knows cannot sign the IPA: it goes back to unsigned rather than to another team
+            if !self.ipaTeam.isEmpty, !teams.contains(where: { $0.id == self.ipaTeam }) { self.ipaTeam = "" }
         }
     }
 
