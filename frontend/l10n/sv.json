@@ -661,6 +661,8 @@
   "ios.ui.gameSettings": "Spelinställningar",
   "ios.ui.gameVersionLabel": "Version",
   "ios.ui.globalDefaults": "Globala standardvärden",
+  "ios.ui.hideNoData": "Dölj spel utan speldata",
+  "ios.ui.hideNoDataNote": "Biblioteket visar bara spelen vars data finns på plats. Om inget spel har sina data än visas alla.",
   "ios.ui.howToFix": "Så åtgärdar du det",
   "ios.ui.howToUpdate": "Så uppdaterar du",
   "ios.ui.increase": "Öka",

@@ -811,6 +811,8 @@
   "ios.ui.gameSettings": "ゲームの設定",
   "ios.ui.gameVersionLabel": "バージョン",
   "ios.ui.globalDefaults": "共通のデフォルト設定",
+  "ios.ui.hideNoData": "ゲームデータのないゲームを隠す",
+  "ios.ui.hideNoDataNote": "ライブラリにはデータがそろったゲームだけを表示します。どのゲームにもまだデータがない場合は、すべて表示します。",
   "ios.ui.howToFix": "解決方法",
   "ios.ui.howToUpdate": "アップデート方法",
   "ios.ui.increase": "増やす",

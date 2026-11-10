@@ -18,6 +18,7 @@ public final class ShellSettingsStore: @unchecked Sendable {
     /// Where the left stick sits, as the engine reads DM_TOUCH_STICK. The corner is the built-in place and is never stored.
     public static let touchStickPlaces = ["corner", "higher", "inward"]
     public static let touchModeKey = "touchMode" // 2d/3d, separate from saved positions
+    public static let hideWithoutDataKey = "hideGamesWithoutData"   // true unless the player turned it off
     public static let touchLayoutKey = "touchLayout"             // the player's arrangement: DM_TOUCH_LAYOUT for every game
 
     /// The store the app reads and writes. Tests and previews swap it.
@@ -44,6 +45,10 @@ public final class ShellSettingsStore: @unchecked Sendable {
     public func clearDataFolderName() { defaults.removeObject(forKey: Self.dataFolderNameKey) }
     public func clearCloudSavesFolderName() { defaults.removeObject(forKey: Self.cloudSavesNameKey) }
     public func storePerformanceHUD(_ on: Bool) { defaults.set(on, forKey: Self.performanceHUDKey) }
+
+    /// The library leaves out the games that have no game data yet. On until the player turns it off.
+    public var hidesGamesWithoutData: Bool { defaults.object(forKey: Self.hideWithoutDataKey) as? Bool ?? true }
+    public func storeHidesGamesWithoutData(_ on: Bool) { defaults.set(on, forKey: Self.hideWithoutDataKey) }
 
     /// The touch controls' size for every game: small, medium (the built-in size) or large.
     public var touchSize: String {

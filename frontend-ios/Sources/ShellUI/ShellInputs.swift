@@ -275,3 +275,13 @@ public struct ShellActions {
         self.onDeleteGame = onDeleteGame
     }
 }
+
+/// The games the library shows. With `hideWithoutData`, a game that needs its game data is left out, unless that would leave
+/// none: a library of games that all wait for their data (just after installing the app) shows them, so the player sees what to copy.
+public enum LibraryFilter {
+    public static func visible(_ games: [GameDetail], hideWithoutData: Bool) -> [GameDetail] {
+        guard hideWithoutData else { return games }
+        let ready = games.filter { $0.game.state != .needsGameData }
+        return ready.isEmpty ? games : ready
+    }
+}

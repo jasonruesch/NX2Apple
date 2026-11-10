@@ -132,6 +132,21 @@ struct ShellSettingsView: View {
                 } footer: {
                     Text(ShellStrings.text("Used by games that have no choice of their own."))
                 }
+
+                Section {
+                    Toggle(isOn: Binding(get: { store.hidesGamesWithoutData }, set: { store.storeHidesGamesWithoutData($0); revision += 1 })) {
+                        Label(ShellStrings.text("Hide games without game data"), systemImage: "eye.slash")
+                            .labelStyle(SettingsRowLabelStyle())
+                    }
+                    .toggleStyle(NativeCreamToggleStyle())
+                    .accessibilityIdentifier("setting.shell.hideWithoutData")
+                    .shellTarget("shs.row.shell.hideWithoutData") {
+                        store.storeHidesGamesWithoutData(!store.hidesGamesWithoutData)
+                        revision += 1
+                    }
+                } footer: {
+                    Text(ShellStrings.text("The library shows only the games whose data is in place. When no game has its data yet, it shows them all."))
+                }
             }
             .formStyle(.grouped)
             .labelStyle(SettingsRowLabelStyle())

@@ -806,6 +806,8 @@
   "ios.ui.gameSettings": "Réglages du jeu",
   "ios.ui.gameVersionLabel": "Version",
   "ios.ui.globalDefaults": "Valeurs par défaut globales",
+  "ios.ui.hideNoData": "Masquer les jeux sans données de jeu",
+  "ios.ui.hideNoDataNote": "La bibliothèque n’affiche que les jeux dont les données sont en place. Si aucun jeu n’a encore ses données, elle les affiche tous.",
   "ios.ui.howToFix": "Comment réparer",
   "ios.ui.howToUpdate": "Comment mettre à jour",
   "ios.ui.increase": "Augmenter",
