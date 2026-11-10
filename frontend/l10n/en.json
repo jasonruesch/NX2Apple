@@ -1936,6 +1936,8 @@
   "shell.driveDone": "Game data is in %@. Connect the drive to the iPhone and choose this folder in the app under %@. The drive has to stay connected while you play.",
   "shell.driveFailed": "The copy stopped: %@",
   "shell.driveFat32": "This drive is FAT32 and can’t hold files over 4 GB. Format it as exFAT or APFS, or choose another drive.",
+  "shell.driveNamed": "Name folders after the game",
+  "shell.driveNamedNote": "Each game’s folder on the drive is called like %@ instead of its title ID. The iPhone app finds the data either way.",
   "shell.driveNoSpace": "Not enough space on the drive: %@ needed, %@ free.",
   "shell.driveNone": "No folder chosen",
   "shell.driveNote": "Needs %@. %@ free on the drive, %@. Connect the drive to the iPhone and choose this folder in the app under %@. The drive has to stay connected while you play.",

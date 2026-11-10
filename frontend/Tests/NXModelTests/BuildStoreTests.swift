@@ -36,6 +36,7 @@ import XCTest
         var exportIPA = false
         var exportOneGame = false
         var driveFolder = ""
+        var driveNamedFolders = false
         var devices: [AppleDevice] = []
         var xcrun = "/usr/bin/true"
         var readTeams: @Sendable () -> [SigningTeam] = { [] }

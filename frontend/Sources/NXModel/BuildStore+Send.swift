@@ -142,6 +142,13 @@ extension BuildStore {
 
     // MARK: To a drive or folder
 
+    /// The name the drive's folder carries for the game whose data is packed: the shared app's own name for it (shell.json), else the
+    /// game's name from the build form.
+    package var driveGameName: String {
+        let titleID = packedTitleID
+        return ShellLibrary.load(root: shellRoot).games.first { $0.titleID == titleID }?.name ?? packedGameName
+    }
+
     /// The folder panel, then what the folder's volume says about the game data.
     package func chooseDriveFolder() {
         guard let folder = chooseFolder() else { return }
@@ -154,13 +161,14 @@ extension BuildStore {
         let folder = devices.driveFolder
         guard !folder.isEmpty, !archivePath.isEmpty else { drive = nil; return }
         let files = ShellInstall.localFiles(in: archivePath)
-        let have = ShellInstall.localFiles(in: DriveCopy.destination(folder: folder, titleID: packedTitleID))
+        let have = DriveCopy.existingFiles(folder: folder, titleID: packedTitleID, name: driveGameName, named: devices.driveNamedFolders)
         let needed = DriveCopy.bytesToCopy(files: files, have: have)
         guard let volume = DriveCopy.volume(at: folder) else { drive = DriveState(volume: nil, needed: needed, problem: nil); return }
         drive = DriveState(volume: volume, needed: needed, problem: DriveCopy.problem(files: files, have: have, volume: volume))
     }
 
-    /// A plain file copy of the game data into `<folder>/<title ID>/`, with progress.
+    /// A plain file copy of the game data into `<folder>/<title ID>/`, or `<folder>/<game name> (<title ID>)/` when the player chose
+    /// named folders, with progress. The game's folder under the other naming is renamed first, so what it holds is not copied again.
     package func copyToDrive() {
         refreshDrive()
         guard canCopyToDrive else { return }
@@ -170,11 +178,13 @@ extension BuildStore {
         driveCancel.set(false)
         send = .copying(done: 0, total: drive?.needed ?? 0)
         let folder = devices.driveFolder, titleID = packedTitleID, archive = archivePath, cancel = driveCancel
+        let name = driveGameName, named = devices.driveNamedFolders
         let files = ShellInstall.localFiles(in: archive)
         DispatchQueue.global(qos: .userInitiated).async {
-            let destination = DriveCopy.destination(folder: folder, titleID: titleID)
+            var destination = DriveCopy.destination(folder: folder, titleID: titleID, name: name, named: named)
             var failed: String?
             do {
+                destination = try DriveCopy.prepareDestination(folder: folder, titleID: titleID, name: name, named: named)
                 try DriveCopy.copy(archive: archive, files: files, to: destination,
                                    progress: { done, total in hop { if case .copying = self.send { self.send = .copying(done: done, total: total) } } },
                                    cancelled: { cancel.value })
