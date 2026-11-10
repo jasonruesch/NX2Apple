@@ -75,11 +75,20 @@ import NXModel
 
         for light in [true, false] {
             try shot("library", LauncherView(stores: stores, library: library, initialPage: .library, performStartupChecks: false), light: light)
+            // the narrowest window, and a controller's focus on the Library tab (the ring and the selected tile's underline)
+            try shot("library-900", LauncherView(stores: stores, library: library, initialPage: .library, performStartupChecks: false), light: light,
+                     size: NSSize(width: 900, height: 680))
+            try shot("library-1100", LauncherView(stores: stores, library: library, initialPage: .library, performStartupChecks: false), light: light,
+                     size: NSSize(width: 1100, height: 760))
+            let pad = PadFocus()
+            pad.show(default: nil)
+            pad.focused = "tab.library"
+            try shot("library-focus", LauncherView(stores: stores, library: library, initialPage: .library, performStartupChecks: false, padFocus: pad), light: light)
             stores.build.target = BuildTarget.ios
             try shot("builds-ios", LauncherView(stores: stores, library: library, initialPage: .builds, performStartupChecks: false), light: light)
             try shot("settings-general", LauncherView(stores: stores, library: library, initialPage: .settings, settingsCategory: .general, performStartupChecks: false), light: light)
             try shot("game-options", LaunchOptionsView(m: stores.build, library: library, gameID: hades), light: light, size: NSSize(width: 680, height: 720))
-            try shot("supported-games", SupportedGamesSheet(games: supported, owned: { id in library.games.first { $0.titleID == id } }, cover: { _ in nil }, showInLibrary: { _ in }),
+            try shot("supported-games", SupportedGamesSheet(games: supported, owned: { id in library.games.first { $0.titleID == id } }, covers: .saved(in: URL(fileURLWithPath: "/nonexistent"), maxPixel: SupportedGamesSheet.coverPixels), showInLibrary: { _ in }),
                      light: light, size: NSSize(width: 680, height: 720))
             try shot("console", ConsoleView(driver: MockConsoleDriver(scenario: .full), lang: Lang("de")), light: light)
         }

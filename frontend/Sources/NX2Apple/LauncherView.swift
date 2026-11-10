@@ -245,7 +245,7 @@ struct LauncherView: View {
                 return FallbackIcon.environment(titleID: titleID, banners: library.artworkDirectory, folder: support)
             }
             library.keysFile = { [m] in m.savedKeys }   // the scan reads renamed packages' title IDs with them (#1012)
-            if performStartupChecks { library.discover(); fetchArtwork(); library.fillMissingTitleNames(engineRoot: EngineLayout.root(repo.path)); _ = stores.deviceStore.refresh(); checkTools() }
+            if performStartupChecks { library.discover(); fetchArtwork(); library.fillMissingTitleNames(); _ = stores.deviceStore.refresh(); checkTools() }
             if performStartupChecks {
                 _ = stores.dependencies.check()
                 if engine.usesEngineStore { engine.prepareEngine() }   // the release app: its engine store, never git
@@ -266,14 +266,14 @@ struct LauncherView: View {
             if performStartupChecks { library.syncSharedApp(root: m.shellCachePath) }
             refreshArtwork()
             readSignatures()
-            if performStartupChecks { fetchArtwork(); library.fillMissingTitleNames(engineRoot: EngineLayout.root(repo.path)) }
+            if performStartupChecks { fetchArtwork(); library.fillMissingTitleNames() }
         }
         .onChange(of: m.savedKeys) { _ in if performStartupChecks { library.discover() } }   // other keys may name other packages (#1012)
         .onReceive(library.$scanning.removeDuplicates().dropFirst()) { scanning in if !scanning && performStartupChecks { checkTools() } }
         .onChange(of: m.shellCachePath) { root in
             if performStartupChecks { library.syncSharedApp(root: root); readSignatures() }
         }
-        .onChange(of: repo.path) { _ in refreshArtwork(); if performStartupChecks { checkTools(); library.fillMissingTitleNames(engineRoot: EngineLayout.root(repo.path)) } }
+        .onChange(of: repo.path) { _ in refreshArtwork(); if performStartupChecks { checkTools(); library.fillMissingTitleNames() } }
         // A clone, pull or update check has finished (the automatic pull at launch among them): the checkout may have moved
         .onReceive(repo.$busy.removeDuplicates().dropFirst()) { busy in if !busy && performStartupChecks { checkTools() } }
         .onReceive(engine.$syncing.removeDuplicates().dropFirst()) { syncing in if !syncing && performStartupChecks { checkTools() } }   // a sync made or moved the engine (its HEAD is what ToolsAge compares)
@@ -325,7 +325,7 @@ struct LauncherView: View {
         }
         .sheet(isPresented: Binding(get: { supportedGames != nil }, set: { if !$0 { supportedGames = nil } })) {
             SupportedGamesSheet(games: supportedGames ?? [], owned: { id in library.games.first { $0.titleID.uppercased() == id } },
-                                cover: { id in ArtworkStore.cachedBanner(id, in: library.artworkDirectory).flatMap { ArtworkImages.shared.image(at: $0, maxPixel: 128) } },
+                                covers: .live(store: artworkStore, directory: library.artworkDirectory, language: loc.lang.code, maxPixel: SupportedGamesSheet.coverPixels),
                                 showInLibrary: showInLibrary)
                 .environmentObject(padFocus)
         }
@@ -460,7 +460,8 @@ struct LauncherView: View {
                     .frame(width: searching ? 16 : 40, height: searching ? 16 : 40).contentShape(Rectangle())
             }
             .keyboardShortcut("f", modifiers: .command)
-            .buttonStyle(.plain).launcherHover().help(loc.t("library.search")).accessibilityLabel(loc.t("library.search"))
+            .buttonStyle(.plain).launcherHover().help(loc.t("library.search") + " (\u{2318}F)")   // the shortcut in the tooltip and to VoiceOver
+            .accessibilityLabel(loc.t("library.search")).accessibilityHint(loc.t("library.searchShortcut"))
             if searching {
                 TextField(loc.t("library.search"), text: $search)
                     .textFieldStyle(.plain).font(.manrope(14))
@@ -703,7 +704,7 @@ struct LauncherView: View {
                         deviceName: devices.deviceName(game.installedDevice), launching: launching,
                         actions: ManageActions(
                             rebuild: { configureBuild(game) }, openOnDevice: { openOnDevice(game) }, options: { optionsFor = game.id }, saves: { savesFor = game.id }, cheats: { cheatsFor = game.id },
-                            changeArtwork: { openArtwork(game) }, rename: { renaming = game }, supportedGames: openSupportedGames,
+                            changeArtwork: { openArtwork(game) }, rename: { renaming = game },
                             reveal: { if let path = game.revealTarget { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } },
                             showLog: { if let log = GameLog.latest(titleID: game.titleID, appPath: game.appPath) { GameLog.show(log) } },
                             removeBuildFiles: { stores.buildFiles.ask(game.id, building: m.running && activeBuildID == game.id) }, remove: { removing = game }, delete: { deleting = game }))
