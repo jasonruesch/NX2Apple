@@ -1079,6 +1079,8 @@
   "ios.ui.gameSettings": "Ajustes do jogo",
   "ios.ui.gameVersionLabel": "Versão",
   "ios.ui.globalDefaults": "Padrões globais",
+  "ios.ui.hideNoData": "Ocultar jogos sem dados de jogo",
+  "ios.ui.hideNoDataNote": "A biblioteca mostra apenas os jogos cujos dados já estão no lugar. Quando nenhum jogo tem seus dados ainda, ela mostra todos.",
   "ios.ui.howToFix": "Como corrigir",
   "ios.ui.howToUpdate": "Como atualizar",
   "ios.ui.increase": "Aumentar",

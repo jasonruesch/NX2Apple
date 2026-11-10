@@ -1079,6 +1079,8 @@
   "ios.ui.gameSettings": "游戏设置",
   "ios.ui.gameVersionLabel": "版本",
   "ios.ui.globalDefaults": "全局默认值",
+  "ios.ui.hideNoData": "隐藏没有游戏数据的游戏",
+  "ios.ui.hideNoDataNote": "游戏库只显示数据已就绪的游戏。如果所有游戏都还没有数据，则全部显示。",
   "ios.ui.howToFix": "如何修复",
   "ios.ui.howToUpdate": "如何更新",
   "ios.ui.increase": "增大",

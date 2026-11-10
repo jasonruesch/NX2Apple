@@ -7169,6 +7169,70 @@
         }
       }
     },
+    "Hide games without game data": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spiele ohne Spieldaten ausblenden"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide games without game data"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ocultar juegos sin datos de juego"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Masquer les jeux sans données de jeu"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nascondi i giochi senza dati di gioco"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゲームデータのないゲームを隠す"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "게임 데이터가 없는 게임 숨기기"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ocultar jogos sem dados de jogo"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dölj spel utan speldata"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏没有游戏数据的游戏"
+          }
+        }
+      }
+    },
     "Higher": {
       "localizations": {
         "de": {
@@ -15613,6 +15677,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "这台设备上的游戏数据会被删除，游戏也会从列表中移除。你自己选择的文件夹不受影响。从 Mac 再次发送游戏数据即可恢复。"
+          }
+        }
+      }
+    },
+    "The library shows only the games whose data is in place. When no game has its data yet, it shows them all.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Bibliothek zeigt nur die Spiele, deren Daten vorhanden sind. Hat noch kein Spiel seine Daten, zeigt sie alle."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The library shows only the games whose data is in place. When no game has its data yet, it shows them all."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La biblioteca solo muestra los juegos cuyos datos ya están en su sitio. Si ningún juego tiene aún sus datos, los muestra todos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La bibliothèque n’affiche que les jeux dont les données sont en place. Si aucun jeu n’a encore ses données, elle les affiche tous."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La libreria mostra solo i giochi i cui dati sono presenti. Se nessun gioco ha ancora i suoi dati, li mostra tutti."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ライブラリにはデータがそろったゲームだけを表示します。どのゲームにもまだデータがない場合は、すべて表示します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "라이브러리에 데이터가 준비된 게임만 표시합니다. 아직 데이터가 있는 게임이 없으면 모두 표시합니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A biblioteca mostra apenas os jogos cujos dados já estão no lugar. Quando nenhum jogo tem seus dados ainda, ela mostra todos."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Biblioteket visar bara spelen vars data finns på plats. Om inget spel har sina data än visas alla."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "游戏库只显示数据已就绪的游戏。如果所有游戏都还没有数据，则全部显示。"
           }
         }
       }

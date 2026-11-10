@@ -1079,6 +1079,8 @@
   "ios.ui.gameSettings": "게임 설정",
   "ios.ui.gameVersionLabel": "버전",
   "ios.ui.globalDefaults": "전역 기본값",
+  "ios.ui.hideNoData": "게임 데이터가 없는 게임 숨기기",
+  "ios.ui.hideNoDataNote": "라이브러리에 데이터가 준비된 게임만 표시합니다. 아직 데이터가 있는 게임이 없으면 모두 표시합니다.",
   "ios.ui.howToFix": "해결 방법",
   "ios.ui.howToUpdate": "업데이트 방법",
   "ios.ui.increase": "늘리기",
