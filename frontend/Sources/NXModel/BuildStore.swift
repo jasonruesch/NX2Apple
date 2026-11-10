@@ -42,6 +42,8 @@ package struct FilePick: Equatable {
     var ipaBundleID: String { get }
     /// The folder the game data is copied to (a drive), empty when none is chosen.
     var driveFolder: String { get set }
+    /// The drive copy names each game's folder `<game name> (<title ID>)` instead of the title ID.
+    var driveNamedFolders: Bool { get set }
     var xcrun: String { get }
     var readTeams: @Sendable () -> [SigningTeam] { get }
     func deviceName(_ udid: String) -> String

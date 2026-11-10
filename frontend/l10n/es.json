@@ -1937,6 +1937,8 @@
   "shell.driveDone": "Los datos del juego están en %@. Conecta el disco al iPhone y elige esta carpeta en la app en %@. El disco debe seguir conectado mientras juegas.",
   "shell.driveFailed": "La copia se detuvo: %@",
   "shell.driveFat32": "Este disco es FAT32 y no admite archivos de más de 4 GB. Fórmatealo como exFAT o APFS, o elige otro disco.",
+  "shell.driveNamed": "Nombrar las carpetas como el juego",
+  "shell.driveNamedNote": "La carpeta de cada juego en la unidad se llama, por ejemplo, %@ en lugar de su ID de título. La app de iPhone encuentra los datos en ambos casos.",
   "shell.driveNoSpace": "No hay suficiente espacio en el disco: se necesitan %@, hay %@ libres.",
   "shell.driveNone": "No se eligió ninguna carpeta",
   "shell.driveNote": "Necesita %@. %@ libres en el disco, %@. Conecta el disco al iPhone y elige esta carpeta en la app en %@. El disco debe seguir conectado mientras juegas.",

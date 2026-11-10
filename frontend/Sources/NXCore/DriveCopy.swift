@@ -69,6 +69,56 @@ package enum DriveCopy {
     /// `<chosen folder>/<title ID>`
     package static func destination(folder: String, titleID: String) -> String { folder + "/" + titleID }
 
+    /// `<chosen folder>/<title ID>`, or with `named` `<chosen folder>/<game name> (<title ID>)`. The shell finds the image in either by
+    /// its identity, so the name only helps the player find a game on the drive. The device's own folder always stays the title ID.
+    package static func destination(folder: String, titleID: String, name: String, named: Bool) -> String {
+        folder + "/" + (named ? namedFolder(titleID: titleID, name: name) : titleID)
+    }
+
+    /// The longest game name kept in a folder name, in characters, so the whole name stays well under exFAT's and FAT32's 255.
+    package static let maxNameLength = 120
+
+    /// `<game name> (<title ID>)`, the name cleaned for any drive's file system: the tags a dump's file name carries (`[0100…]`,
+    /// `[v0]`, a `(<title ID>)`, a site's name such as `(example.xyz)`) are dropped, since the folder names the title ID itself, the
+    /// characters FAT32, exFAT and NTFS refuse (`/ \ : * ? " < > |` and control characters) become spaces, runs of spaces become one,
+    /// and a space, dot, `+`, `-` or `_` left at either end is dropped (Windows and FAT drop a trailing dot). A name with nothing left
+    /// is the title ID alone.
+    package static func namedFolder(titleID: String, name: String) -> String {
+        let untagged = name.replacingOccurrences(of: "\\[[^\\]]*\\]|\\(\\s*[0-9A-Fa-f]{16}\\s*\\)|\\(\\s*[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+\\s*\\)",
+                                                 with: " ", options: .regularExpression)
+        let refused = CharacterSet(charactersIn: "/\\:*?\"<>|").union(.controlCharacters)
+        let spaced = String(untagged.unicodeScalars.map { refused.contains($0) ? " " : Character($0) })
+        var cleaned = spaced.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        if cleaned.count > maxNameLength { cleaned = String(cleaned.prefix(maxNameLength)) }
+        cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: " .+-_"))
+        return cleaned.isEmpty ? titleID : cleaned + " (" + titleID + ")"
+    }
+
+    /// The game's folder under the other naming, when the drive holds it and the chosen one is not there yet: the title ID folder when
+    /// the copy names folders, the named one when it does not. nil when there is nothing to take over.
+    package static func otherFolder(folder: String, titleID: String, name: String, named: Bool, fm: FileManager = .default) -> String? {
+        let target = destination(folder: folder, titleID: titleID, name: name, named: named)
+        let other = destination(folder: folder, titleID: titleID, name: name, named: !named)
+        var isDir: ObjCBool = false
+        guard other != target, !fm.fileExists(atPath: target), fm.fileExists(atPath: other, isDirectory: &isDir), isDir.boolValue else { return nil }
+        return other
+    }
+
+    /// The folder the copy writes to. A folder of the game under the other naming is renamed to it first, so the files already there
+    /// are kept and only what is missing is copied, with no second copy of many GB on the drive.
+    package static func prepareDestination(folder: String, titleID: String, name: String, named: Bool, fm: FileManager = .default) throws -> String {
+        let target = destination(folder: folder, titleID: titleID, name: name, named: named)
+        if let other = otherFolder(folder: folder, titleID: titleID, name: name, named: named, fm: fm) { try fm.moveItem(atPath: other, toPath: target) }
+        return target
+    }
+
+    /// What the drive holds of the game already: the chosen folder, or the folder under the other naming that the copy will rename.
+    package static func existingFiles(folder: String, titleID: String, name: String, named: Bool, fm: FileManager = .default) -> [String: Int64] {
+        let path = otherFolder(folder: folder, titleID: titleID, name: name, named: named, fm: fm)
+            ?? destination(folder: folder, titleID: titleID, name: name, named: named)
+        return ShellInstall.localFiles(in: path)
+    }
+
     package enum CopyError: Error, Equatable { case cancelled }
 
     /// Copies `files` (paths relative to `archive`) into `destination`. A file already there at the same size is left alone, so a

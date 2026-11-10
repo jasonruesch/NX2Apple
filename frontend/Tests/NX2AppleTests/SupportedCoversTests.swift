@@ -89,7 +89,9 @@ import NXModel
         XCTAssertNil(ArtworkStore.cachedBanner(d, in: folder), "no source: no file")
         for id in [a, b, c] {
             let image = try XCTUnwrap(covers.image(id), id)
-            XCTAssertLessThanOrEqual(image.representations.first?.pixelsWide ?? .max, SupportedGamesSheet.coverPixels, "decoded at the slot's size")
+            // The pixels of the image itself: on macOS 27 the representation of an NSImage made from a CGImage reports twice its width
+            XCTAssertLessThanOrEqual(image.cgImage(forProposedRect: nil, context: nil, hints: nil)?.width ?? .max, SupportedGamesSheet.coverPixels,
+                                     "decoded at the slot's size")
         }
         XCTAssertNil(covers.image(d), "the placeholder stays")
         let game = LibraryGame(titleID: a, name: "Game A")

@@ -1937,6 +1937,8 @@
   "shell.driveDone": "Speldata finns i %@. Anslut disken till iPhone och välj den här mappen i appen under %@. Disken måste vara ansluten medan du spelar.",
   "shell.driveFailed": "Kopieringen stoppades: %@",
   "shell.driveFat32": "Disken är FAT32 och kan inte rymma filer över 4 GB. Formatera den som exFAT eller APFS, eller välj en annan disk.",
+  "shell.driveNamed": "Döp mappar efter spelet",
+  "shell.driveNamedNote": "Varje spels mapp på enheten heter då till exempel %@ i stället för dess titel-ID. iPhone-appen hittar datan i båda fallen.",
   "shell.driveNoSpace": "Inte tillräckligt med utrymme på disken: %@ behövs, %@ ledigt.",
   "shell.driveNone": "Ingen mapp vald",
   "shell.driveNote": "Behöver %@. %@ ledigt på disken, %@. Anslut disken till iPhone och välj den här mappen i appen under %@. Disken måste vara ansluten medan du spelar.",

@@ -69,7 +69,7 @@ package struct ExportSteps: View {
                     .opacity(inert ? ExportGrid.quiet : 1)
             }
             VStack(alignment: .leading, spacing: ExportGrid.noteGap) {
-                if toDrive { driveRow; driveStatus } else { deviceRow; deviceStatus }
+                if toDrive { driveRow; namingRow; driveStatus } else { deviceRow; deviceStatus }
             }
             .padding(.leading, ExportGrid.axis).padding(.trailing, ExportGrid.inset).padding(.bottom, ExportGrid.inset)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -215,6 +215,25 @@ package struct ExportSteps: View {
     }
 
     private var gameDataRow: String { L10n.string("ios.ui.gameData", loc.lang) }
+
+    /// Names each game's folder on the drive after the game instead of its title ID. The device's own folder keeps the title ID, the
+    /// shell needs it there; on a drive it finds the image by its identity, whatever the folder is called.
+    private var namingRow: some View {
+        HStack(alignment: .center, spacing: ExportGrid.gap) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(loc.t("shell.driveNamed")).font(.manrope(13))
+                Text(String(format: loc.t("shell.driveNamedNote"), DriveCopy.namedFolder(titleID: build.packedTitleID.isEmpty ? "0100000000000000" : build.packedTitleID,
+                                                                                      name: build.driveGameName.isEmpty ? "Game" : build.driveGameName)))
+                    .font(.manrope(12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Toggle(loc.t("shell.driveNamed"), isOn: Binding(get: { devices.driveNamedFolders },
+                                                            set: { devices.driveNamedFolders = $0; build.refreshDrive() }))
+                .toggleStyle(LauncherSwitchStyle()).labelsHidden()
+                .disabled(copying)
+        }
+        .opacity(inert ? ExportGrid.quiet : 1)
+    }
 
     @ViewBuilder private var driveStatus: some View {
         if case .copying(let done, let total) = build.send {

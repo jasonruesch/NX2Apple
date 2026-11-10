@@ -28,6 +28,7 @@ package enum SendWhere {
     nonisolated package static let oneGameKey = "exportOneGame"
     nonisolated package static let sendWhereKey = "sendWhere"
     nonisolated package static let driveFolderKey = "driveFolder"
+    nonisolated package static let driveNamedFoldersKey = "driveNamedFolders"
     nonisolated package static let ipaTeamKey = "ipaTeam"
     nonisolated package static let ipaBundleIDKey = "ipaBundleID"
 
@@ -58,6 +59,11 @@ package enum SendWhere {
     /// The folder (a drive) the game data is copied to. Saved when it changes.
     @Published package var driveFolder: String {
         didSet { defaults.set(driveFolder, forKey: Self.driveFolderKey) }
+    }
+    /// The drive copy names each game's folder after the game, `<game name> (<title ID>)`, instead of the title ID. Off until the
+    /// player turns it on, saved when it changes.
+    @Published package var driveNamedFolders: Bool {
+        didSet { defaults.set(driveNamedFolders, forKey: Self.driveNamedFoldersKey) }
     }
     /// The team the shared app's IPA is signed for. Empty: the IPA is unsigned, for a sideloading tool to sign. Saved when it changes.
     @Published package var ipaTeam: String {
@@ -98,6 +104,7 @@ package enum SendWhere {
         self.exportOneGame = defaults.bool(forKey: Self.oneGameKey)
         self.sendWhere = defaults.string(forKey: Self.sendWhereKey) ?? SendWhere.device
         self.driveFolder = defaults.string(forKey: Self.driveFolderKey) ?? ""
+        self.driveNamedFolders = defaults.bool(forKey: Self.driveNamedFoldersKey)
         self.ipaTeam = defaults.string(forKey: Self.ipaTeamKey) ?? ""
         self.ipaBundleID = defaults.string(forKey: Self.ipaBundleIDKey) ?? ""
     }
