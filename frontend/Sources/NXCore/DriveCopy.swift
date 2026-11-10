@@ -79,16 +79,18 @@ package enum DriveCopy {
     package static let maxNameLength = 120
 
     /// `<game name> (<title ID>)`, the name cleaned for any drive's file system: the tags a dump's file name carries (`[0100…]`,
-    /// `[v0]`, a `(<title ID>)`) are dropped, since the folder names the title ID itself, the characters FAT32, exFAT and NTFS refuse
-    /// (`/ \ : * ? " < > |` and control characters) become spaces, runs of spaces become one, and a leading or trailing space or dot
-    /// is dropped (Windows and FAT drop a trailing dot). A name with nothing left is the title ID alone.
+    /// `[v0]`, a `(<title ID>)`, a site's name such as `(example.xyz)`) are dropped, since the folder names the title ID itself, the
+    /// characters FAT32, exFAT and NTFS refuse (`/ \ : * ? " < > |` and control characters) become spaces, runs of spaces become one,
+    /// and a space, dot, `+`, `-` or `_` left at either end is dropped (Windows and FAT drop a trailing dot). A name with nothing left
+    /// is the title ID alone.
     package static func namedFolder(titleID: String, name: String) -> String {
-        let untagged = name.replacingOccurrences(of: "\\[[^\\]]*\\]|\\(\\s*[0-9A-Fa-f]{16}\\s*\\)", with: " ", options: .regularExpression)
+        let untagged = name.replacingOccurrences(of: "\\[[^\\]]*\\]|\\(\\s*[0-9A-Fa-f]{16}\\s*\\)|\\(\\s*[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+\\s*\\)",
+                                                 with: " ", options: .regularExpression)
         let refused = CharacterSet(charactersIn: "/\\:*?\"<>|").union(.controlCharacters)
         let spaced = String(untagged.unicodeScalars.map { refused.contains($0) ? " " : Character($0) })
         var cleaned = spaced.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         if cleaned.count > maxNameLength { cleaned = String(cleaned.prefix(maxNameLength)) }
-        cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: " ."))
+        cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: " .+-_"))
         return cleaned.isEmpty ? titleID : cleaned + " (" + titleID + ")"
     }
 

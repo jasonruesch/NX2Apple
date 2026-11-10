@@ -36,6 +36,11 @@ import NXModel
         XCTAssertEqual(DriveCopy.namedFolder(titleID: titleID, name: "Metroid Dread [010093801237C000][v0]"), "Metroid Dread (010093801237C000)")
         XCTAssertEqual(DriveCopy.namedFolder(titleID: titleID, name: "Metroid Dread (010093801237C000)"), "Metroid Dread (010093801237C000)")
         XCTAssertEqual(DriveCopy.namedFolder(titleID: titleID, name: "Splatoon 3 (Demo)"), "Splatoon 3 (Demo) (010093801237C000)")
+        // a site's tag and the separator left before it go, a "+" inside the name stays
+        XCTAssertEqual(DriveCopy.namedFolder(titleID: titleID, name: "Super Smash Bros. Ultimate + (nsw2u.xyz)"),
+                       "Super Smash Bros. Ultimate (010093801237C000)")
+        XCTAssertEqual(DriveCopy.namedFolder(titleID: titleID, name: "Super Mario 3D World + Bowser's Fury"),
+                       "Super Mario 3D World + Bowser's Fury (010093801237C000)")
         // nothing left of the name: the title ID alone
         XCTAssertEqual(DriveCopy.namedFolder(titleID: titleID, name: "???"), titleID)
         XCTAssertEqual(DriveCopy.namedFolder(titleID: titleID, name: ""), titleID)
