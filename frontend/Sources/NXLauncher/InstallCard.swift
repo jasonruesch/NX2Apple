@@ -27,10 +27,14 @@ package struct InstallCard: View {
         switch build.send { case .sending, .copying: return true; default: return false }
     }
 
-    private var card: some View {
-        let options = [(value: "", label: loc.t("dev.none"))] + devices.devices.map { d in
+    private var deviceOptions: [(value: String, label: String)] {
+        [(value: "", label: loc.t("dev.none"))] + devices.devices.map { d in
             (value: d.id, label: d.name + (d.reachable ? "" : " (" + loc.t("dev.notConnected") + ")"))
         }
+    }
+
+    private var card: some View {
+        let options = deviceOptions
         let teams = devices.teams.map { (value: $0.id, label: $0.label(personalTeam: loc.t("dev.personalTeam"))) }
         let needsCertificate = devices.teams.first { $0.id == devices.signingTeam }.map { !$0.hasCertificate } ?? false
         let footnote = devices.exportIPA ? ""
@@ -51,6 +55,7 @@ package struct InstallCard: View {
                         .frame(width: ExportGrid.switchWidth)
                 }
                 CardDivider()
+                if !devices.exportOneGame { ipaRows(teams: teams) }
                 ExportSteps(build: build, devices: devices)
             } else {
                 CardRow(loc.t("dev.target"), detail: devices.checked && devices.devices.isEmpty ? loc.t("dev.noDevices") : "") {
@@ -78,5 +83,33 @@ package struct InstallCard: View {
         devices.exportOneGame = oneGame
         build.exportedIPAPath = ""
         build.send = .idle
+    }
+
+    /// The IPA's signing team (or unsigned, for a sideloading tool) and its bundle ID (empty: the shared app's own).
+    @ViewBuilder private func ipaRows(teams: [(value: String, label: String)]) -> some View {
+        let signing = [(value: "", label: loc.t("shared.ipaUnsigned"))] + teams
+        CardRow(loc.t("shared.ipaSigning"), detail: loc.t(devices.ipaTeam.isEmpty ? "shared.ipaUnsignedNote" : "shared.ipaSignedNote")) {
+            LauncherDropdown(options: signing, selection: devices.ipaTeam, label: loc.t("shared.ipaSigning")) { devices.ipaTeam = $0 }
+        }
+        CardDivider()
+        let current = ShellLibrary.load(root: build.shellRoot).bundleID
+        CardRow(loc.t("shared.ipaBundleID"),
+                detail: devices.ipaBundleIDValid ? String(format: loc.t("shared.ipaBundleIDNote"), current) : loc.t("shared.ipaBundleIDInvalid"),
+                dot: devices.ipaBundleIDValid ? nil : LauncherPalette.building) {
+            TextField(current, text: $devices.ipaBundleID)
+                .textFieldStyle(.roundedBorder).font(.manrope(13))
+                .autocorrectionDisabled()
+                .frame(width: ExportGrid.switchWidth)
+                .accessibilityLabel(loc.t("shared.ipaBundleID"))
+        }
+        CardDivider()
+        // A signed IPA is built for the device it goes to, so Xcode registers that device with the team before the export
+        if !devices.ipaTeam.isEmpty {
+            CardRow(loc.t("dev.target"), detail: devices.checked && devices.devices.isEmpty ? loc.t("dev.noDevices") : loc.t("shared.ipaDeviceNote")) {
+                RefreshDevicesButton(devices: devices)
+                LauncherDropdown(options: deviceOptions, selection: devices.installDevice, label: loc.t("dev.target")) { devices.installDevice = $0 }
+            }
+            CardDivider()
+        }
     }
 }

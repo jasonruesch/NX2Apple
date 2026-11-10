@@ -242,16 +242,19 @@ import NXModel
         var existing = LibraryGame(titleID: titleID, name: "Hades")
         existing.appPath = app.path
         existing.artworkPath = "/some/external/artwork.jpg"
-        // A base package whose name carries no title ID is keyed by its path until the build finishes.
-        var pending = LibraryGame(titleID: "/games/Hades.nsp", name: "Hades")
-        pending.inputs = ["base": ["/games/Hades.nsp"]]
+        // A base package whose name carries no title ID is keyed by its path until the build finishes. The file is there: the
+        // load drops a game file that is gone.
+        let package = temporary.appendingPathComponent("Hades.nsp").path
+        try Data([0]).write(to: URL(fileURLWithPath: package))
+        var pending = LibraryGame(titleID: package, name: "Hades")
+        pending.inputs = ["base": [package]]
         try JSONEncoder().encode([existing, pending]).write(to: file)
         let library = GameLibrary(file: file)
         library.recordCompletedApp(path: app.path, for: pending.id)
         XCTAssertEqual(library.games.count, 1)
         XCTAssertEqual(library.games[0].titleID, titleID)
         XCTAssertEqual(library.games[0].artworkPath, "/some/external/artwork.jpg")
-        XCTAssertEqual(library.games[0].inputs["base"], ["/games/Hades.nsp"])
+        XCTAssertEqual(library.games[0].inputs["base"], [package])
         XCTAssertTrue(library.games[0].isReady)
         XCTAssertEqual(library.selectedID, library.games[0].id)
     }
@@ -707,6 +710,45 @@ import NXModel
         XCTAssertEqual(Self.canon(repaired.sourceFolder), Self.canon(game.path))
         XCTAssertEqual(repaired.inputs["update"]?.map(Self.canon), [Self.canon(updNSZ.path)])
         XCTAssertEqual(repaired.inputs["dlc"]?.map(Self.canon), [Self.canon(dlcNSZ.path)])
+    }
+
+    /// The player moves the update and DLC out of a subfolder and renames the base while the launcher is open: a refresh drops the
+    /// paths that are gone and fills the slots from the files' new names.
+    func testARefreshFindsGameFilesThatWereMovedOrRenamed() throws {
+        let fm = FileManager.default
+        let updates = temporary.appendingPathComponent("Updates")
+        try fm.createDirectory(at: updates, withIntermediateDirectories: true)
+        let oldBase = temporary.appendingPathComponent("Hades [\(titleID)][v0][US].nsp")
+        let oldUpdate = updates.appendingPathComponent("Hades [0100535012974800][v65536][US].nsp")
+        let oldDLC = updates.appendingPathComponent("Hades [0100535012975001][v0].nsp")
+        for f in [oldBase, oldUpdate, oldDLC] { try Data([0]).write(to: f) }
+        let state = temporary.appendingPathComponent("library.json")
+        let keys = temporary.appendingPathComponent("Secrets/prod.keys")   // where the scan does not look (it checks keys/ and the folder itself): it must stay
+        try fm.createDirectory(at: keys.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data([0]).write(to: keys)
+        var game = LibraryGame(titleID: titleID, name: "Hades")
+        game.inputs = ["base": [oldBase.path], "update": [oldUpdate.path], "dlc": [oldDLC.path], "keys": [keys.path]]
+        try JSONEncoder().encode([game]).write(to: state)
+        let library = GameLibrary(file: state)
+        library.applicationFolders = []
+        XCTAssertEqual(library.games.first?.inputs["update"], [oldUpdate.path], "the files are there: nothing is dropped on load")
+
+        let newBase = temporary.appendingPathComponent("Hades [\(titleID)][v0][Base].nsp")
+        let newUpdate = temporary.appendingPathComponent("Hades [0100535012974800][v65536][Update].nsp")
+        let newDLC = temporary.appendingPathComponent("Hades - Extra [0100535012975001][v0][DLC].nsp")
+        for (from, to) in [(oldBase, newBase), (oldUpdate, newUpdate), (oldDLC, newDLC)] { try fm.moveItem(at: from, to: to) }
+        try fm.removeItem(at: updates)
+
+        let finished = expectation(description: "the refresh ends")
+        let token = library.$scanning.dropFirst().filter { !$0 }.sink { _ in finished.fulfill() }
+        library.setFolder(temporary)
+        wait(for: [finished], timeout: 3)
+        withExtendedLifetime(token) {}
+        let found = try XCTUnwrap(library.games.first { $0.titleID == titleID })
+        XCTAssertEqual(found.inputs["base"]?.map(Self.canon), [Self.canon(newBase.path)])
+        XCTAssertEqual(found.inputs["update"]?.map(Self.canon), [Self.canon(newUpdate.path)])
+        XCTAssertEqual(found.inputs["dlc"]?.map(Self.canon), [Self.canon(newDLC.path)])
+        XCTAssertEqual(found.inputs["keys"], [keys.path], "the keys file was not moved: the game keeps it")
     }
 
     /// Base, update and DLC in one folder: the folder is its own game folder and the climb goes no further.

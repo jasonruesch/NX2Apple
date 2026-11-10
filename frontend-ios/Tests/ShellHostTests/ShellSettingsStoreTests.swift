@@ -25,6 +25,14 @@ import ShellUI
         #expect(store.defaults.object(forKey: ShellSettingsStore.padMapKey) == nil)
     }
 
+    @Test func gamesWithoutDataAreHiddenUntilThePlayerTurnsItOff() {
+        let store = shell()
+        #expect(store.hidesGamesWithoutData)
+        store.storeHidesGamesWithoutData(false)
+        #expect(!ShellSettingsStore(defaults: store.defaults).hidesGamesWithoutData)
+        #expect(store.gameDefaults.isEmpty, "a library choice is not a game setting")
+    }
+
     @Test func theOverlayChoiceIsNilUntilThePlayerMakesOne() {
         let store = shell()
         #expect(store.performanceHUD == nil && store.gameDefaults.isEmpty)

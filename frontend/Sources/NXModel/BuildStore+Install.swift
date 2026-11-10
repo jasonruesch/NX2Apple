@@ -12,6 +12,10 @@ extension BuildStore {
         let python = deps.pythonPath.isEmpty ? Toolchain.findPython().path : deps.pythonPath
         var installer = ShellInstaller(xcrun: devices.xcrun, repo: repo.path, python: python, root: shellRoot, device: devices.installDevice, team: devices.signingTeam)
         installer.deviceName = devices.deviceName(devices.installDevice)
+        if devices.exportIPA {   // only the export reads them; an install keeps the device's team and shell.json's bundle ID
+            installer.exportTeam = devices.ipaTeam
+            installer.exportBundleID = devices.ipaBundleIDValid ? devices.ipaBundleIDChoice : ""
+        }
         installer.defaults = defaults
         installer.lang = localizer.lang
         installer.ownGroup = true

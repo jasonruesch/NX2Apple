@@ -72,6 +72,12 @@ import NXModel
             if os.path.exists('\(state)/xcode-fails'):
                 print('error: Build input file cannot be found: DmShell.m', flush=True)
                 sys.exit(65)
+            if os.path.exists('\(state)/no-device') and val('-destination').startswith('id='):
+                print('xcodebuild: error: Unable to find a destination matching the provided destination specifier:', flush=True)
+                sys.exit(70)
+            if os.path.exists('\(state)/team-taken') and 'PRODUCT_BUNDLE_IDENTIFIER=org.nxnative.shell' in a:
+                print('error: The app identifier "org.nxnative.shell" cannot be registered to your development team.', flush=True)
+                sys.exit(65)
             app = val('-derivedDataPath') + '/Build/Products/Release-iphoneos/DmShell.app'
             os.makedirs(app + '/Frameworks/DmGame\(titleID).framework', exist_ok=True)
             if not os.path.exists(app + '/DmShell'):
@@ -1087,5 +1093,167 @@ import NXModel
         stores.deviceStore.exportIPA = true
         model.target = BuildTarget.mac
         XCTAssertFalse(model.exportsShell)
+    }
+
+    // ---- the IPA's own team and bundle ID ----
+
+    func testASignedExportBuildsForTheTeamWithProvisioningAndTheChosenID() {
+        let build = ShellInstall.exportBuildCommand(xcrun: "/x", root: "/R", bundleID: "com.example.games", team: "ABCDE12345")
+        XCTAssertEqual(build, ["/x", "xcodebuild", "-project", "/R/project/DmShell.xcodeproj", "-scheme", "DmShell", "-configuration", "Release",
+                               "-destination", "generic/platform=iOS", "-derivedDataPath", "/R/export/derived-data", "-allowProvisioningUpdates",
+                               "PRODUCT_BUNDLE_IDENTIFIER=com.example.games", "DEVELOPMENT_TEAM=ABCDE12345", "build"])
+        XCTAssertFalse(build.contains { $0.hasPrefix("CODE_SIGNING_ALLOWED") || $0.hasPrefix("id=") })
+        XCTAssertEqual(ShellInstall.certificatesCommand(codesign: "/c", app: "/A.app", prefix: "/w/cert"), ["/c", "-d", "--extract-certificates=/w/cert", "/A.app"])
+        XCTAssertEqual(ShellInstall.entitlementsDumpCommand(codesign: "/c", app: "/A.app", file: "/w/e.plist"), ["/c", "-d", "--entitlements", "/w/e.plist", "--xml", "/A.app"])
+        XCTAssertEqual(ShellInstall.teamSignCommand(codesign: "/c", identity: "AB12", entitlements: "/e", path: "/A.app"),
+                       ["/c", "--force", "--sign", "AB12", "--timestamp=none", "--entitlements", "/e", "--generate-entitlement-der", "/A.app"])
+        XCTAssertEqual(ShellInstall.teamSignCommand(codesign: "/c", identity: "AB12", entitlements: nil, path: "/F.framework"),
+                       ["/c", "--force", "--sign", "AB12", "--timestamp=none", "/F.framework"])
+        XCTAssertEqual(ShellInstall.identityHash(certificate: Data("abc".utf8)), "A9993E364706816ABA3E25717850C26C9CD0D89D")
+    }
+
+    func testABundleIDNeedsTwoOrMoreDottedPartsOfLettersDigitsAndHyphens() {
+        for good in ["com.example.games", "org.nxnative.shell.ABCDE12345", "a-b.c1"] { XCTAssertTrue(ShellInstall.isValidBundleID(good), good) }
+        for bad in ["", "games", "com..games", ".com.games", "com.games.", "com.my games", "com.example_games", "com.exämple"] {
+            XCTAssertFalse(ShellInstall.isValidBundleID(bad), bad)
+        }
+    }
+
+    func testTheDataSendFindsAnAppWithTheBundleIDTheLastExportGaveIt() throws {
+        let apps = [InstalledApp(bundle: "com.example.games", name: "Mine"), InstalledApp(bundle: "org.nxnative.shell", name: "NX2Apple"),
+                    InstalledApp(bundle: "com.apple.mobilesafari", name: "Safari")]
+        XCTAssertEqual(ShellInstall.shellApps(in: apps).map(\.bundle), ["org.nxnative.shell"])
+        XCTAssertEqual(ShellInstall.shellApps(in: apps, exported: "com.example.games").map(\.bundle), ["com.example.games", "org.nxnative.shell"])
+        let root = path("root")
+        XCTAssertNil(ShellInstall.exportedBundleID(root: root))
+        try fm.createDirectory(atPath: ShellInstall.exportAppPath(root: root), withIntermediateDirectories: true)
+        try (["CFBundleIdentifier": "com.example.games"] as NSDictionary).write(toFile: ShellInstall.exportAppPath(root: root) + "/Info.plist", atomically: true)
+        XCTAssertEqual(ShellInstall.exportedBundleID(root: root), "com.example.games")
+    }
+
+    /// codesign that records its calls: it hands out a certificate and Xcode's entitlements, and signs (or fails to, on `sign-fails`).
+    private func makeCodesign() throws -> String {
+        let codesign = path("codesign")
+        try write(codesign, """
+        #!/usr/bin/python3
+        import sys, os
+        a = sys.argv[1:]
+        open('\(state)/codesign.txt', 'a').write(' '.join(a) + '\\n')
+        if a[0] == '-d' and a[1].startswith('--extract-certificates='):
+            open(a[1].split('=', 1)[1] + '0', 'wb').write(b'abc')
+        elif a[0] == '-d' and a[1] == '--entitlements':
+            open(a[2], 'w').write('<plist><dict><key>application-identifier</key><string>T.com.example.games</string></dict></plist>')
+        elif a[0] == '--force':
+            if os.path.exists('\(state)/sign-fails'):
+                print('error: The specified item could not be found in the keychain.', flush=True)
+                sys.exit(1)
+        else:
+            sys.exit(2)
+        """)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: codesign)
+        return codesign
+    }
+
+    private func signedInstaller(_ f: Fixture, bundleID: String = "") throws -> ShellInstaller {
+        var i = installer(f)
+        i.exportTeam = "ABCDE12345"
+        i.exportBundleID = bundleID
+        i.codesign = try makeCodesign()
+        return i
+    }
+
+    private var codesignCalls: [String] { ((try? String(contentsOfFile: state + "/codesign.txt", encoding: .utf8)) ?? "").split(separator: "\n").map(String.init) }
+
+    func testASignedExportSignsTheStagedAppAgainWithXcodesIdentityAndEntitlements() throws {
+        let f = try makeFixture()
+        let outcome = try signedInstaller(f, bundleID: "com.example.games").export(framework: f.framework, titleID: titleID, name: "Test Game")
+        XCTAssertTrue(outcome.ok, outcome.message)
+        XCTAssertEqual(outcome.bundleID, "com.example.games", "the data send looks for the app under the IPA's ID")
+        let xcodebuild = try XCTUnwrap(calls.first { $0.hasPrefix("xcodebuild") })
+        XCTAssertTrue(xcodebuild.contains("DEVELOPMENT_TEAM=ABCDE12345") && xcodebuild.contains("-allowProvisioningUpdates")
+                      && xcodebuild.contains("PRODUCT_BUNDLE_IDENTIFIER=com.example.games"), xcodebuild)
+        XCTAssertFalse(xcodebuild.contains("CODE_SIGNING_ALLOWED=NO"), xcodebuild)
+        let built = ShellInstall.exportAppPath(root: f.root), staged = ShellInstall.exportStage(root: f.root) + "/Payload/DmShell.app"
+        let signing = ShellInstall.exportFolder(root: f.root) + "/signing"
+        // the identity is the SHA-1 of the certificate the built app carries; no framework changed, so only the app is signed
+        XCTAssertEqual(codesignCalls, ["-d --extract-certificates=\(signing)/cert \(built)",
+                                       "-d --entitlements \(signing)/entitlements.plist --xml \(built)",
+                                       "--force --sign A9993E364706816ABA3E25717850C26C9CD0D89D --timestamp=none --entitlements \(signing)/entitlements.plist --generate-entitlement-der \(staged)"])
+        XCTAssertFalse(fm.fileExists(atPath: signing), "the certificate and entitlements are removed")
+        XCTAssertTrue(fm.fileExists(atPath: outcome.ipaPath))
+        XCTAssertEqual(ShellLibrary.load(root: f.root).bundleID, ShellLibrary.defaultBundleID, "the IPA's ID does not change the install's")
+    }
+
+    func testTheBuildStageSaysWhetherTheIPAIsSigned() throws {
+        final class Names: @unchecked Sendable { var list: [String] = [] }
+        let f = try makeFixture()
+        for team in ["", "ABCDE12345"] {
+            let names = Names()
+            var i = try signedInstaller(f)
+            i.exportTeam = team
+            i.stage = { names.list.append($0.name) }
+            XCTAssertTrue(i.export(framework: f.framework, titleID: titleID, name: "Test Game").ok)
+            let expected = L10n.string(team.isEmpty ? "shell.exportBuildStage" : "shell.exportSignedBuildStage", .en)
+            XCTAssertTrue(names.list.contains(expected), names.list.joined(separator: ", "))
+        }
+    }
+
+    func testASignedExportIsBuiltForTheChosenDeviceSoXcodeRegistersIt() throws {
+        XCTAssertEqual(ShellInstall.exportBuildCommand(xcrun: "/x", root: "/R", bundleID: "b.c", team: "T", device: "DEV-1")[8...9], ["-destination", "id=DEV-1"])
+        XCTAssertEqual(ShellInstall.exportBuildCommand(xcrun: "/x", root: "/R", bundleID: "b.c", device: "DEV-1")[8...9],
+                       ["-destination", "generic/platform=iOS"], "an unsigned build has no team to register the device with")
+        let f = try makeFixture()
+        var i = try signedInstaller(f)
+        i.device = "DEV-1"
+        XCTAssertTrue(i.export(framework: f.framework, titleID: titleID, name: "Test Game").ok)
+        XCTAssertEqual(calls.filter { $0.hasPrefix("xcodebuild") }.map { $0.contains("-destination id=DEV-1") }, [true])
+    }
+
+    func testADeviceThatIsNotConnectedFallsBackToTheTeamsRegisteredDevices() throws {
+        let f = try makeFixture()
+        try write(state + "/no-device", "")
+        var i = try signedInstaller(f)
+        i.device = "DEV-1"
+        let outcome = i.export(framework: f.framework, titleID: titleID, name: "Test Game")
+        XCTAssertTrue(outcome.ok, outcome.message)
+        XCTAssertEqual(calls.filter { $0.hasPrefix("xcodebuild") }.map { $0.contains("-destination generic/platform=iOS") }, [false, true])
+    }
+
+    func testASignedExportSignsTheFrameworksWhoseShadersItPacked() throws {
+        let f = try makeFixture(entitlements: false)
+        try write(ShellInstall.exportAppPath(root: f.root) + "/Frameworks/DmGame\(titleID).framework/msl/b-test/shader.json", "reflection")
+        var i = try signedInstaller(f)
+        i.exportTeam = "ABCDE12345"
+        let library = ShellLibrary(games: [ShellLibrary.Game(titleID: titleID, name: "Test Game", framework: "DmGame\(titleID).framework")])
+        let outcome = i.packExport(app: URL(fileURLWithPath: ShellInstall.exportAppPath(root: f.root)), library: library, teamSigned: true, entryLimit: 2)
+        XCTAssertTrue(outcome.ok, outcome.message)
+        let signs = codesignCalls.filter { $0.hasPrefix("--force") }
+        XCTAssertEqual(signs.count, 2, signs.joined(separator: "\n"))
+        XCTAssertTrue(signs[0].hasSuffix("/Payload/DmShell.app/Frameworks/DmGame\(titleID).framework") && !signs[0].contains("--entitlements"), signs[0])
+        XCTAssertTrue(signs[1].hasSuffix("/Payload/DmShell.app") && signs[1].contains("--entitlements"), signs[1])
+    }
+
+    func testASignedExportThatCannotSignStopsWithoutAnIPA() throws {
+        let f = try makeFixture()
+        try write(state + "/sign-fails", "")
+        let outcome = try signedInstaller(f).export(framework: f.framework, titleID: titleID, name: "Test Game")
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("could not be found in the keychain"), outcome.message)
+        XCTAssertFalse(fm.fileExists(atPath: ShellInstall.ipaPath(root: f.root)))
+        XCTAssertFalse(fm.fileExists(atPath: ShellInstall.exportStage(root: f.root)))
+    }
+
+    func testASignedExportFallsBackToTheTeamsOwnIDOnlyForTheDefaultOne() throws {
+        let f = try makeFixture()
+        try write(state + "/team-taken", "")
+        let outcome = try signedInstaller(f).export(framework: f.framework, titleID: titleID, name: "Test Game")
+        XCTAssertTrue(outcome.ok, outcome.message)
+        XCTAssertEqual(outcome.bundleID, "org.nxnative.shell.ABCDE12345")
+        XCTAssertEqual(calls.filter { $0.hasPrefix("xcodebuild") }.count, 2)
+        XCTAssertEqual(ShellLibrary.load(root: f.root).bundleID, ShellLibrary.defaultBundleID, "an export does not change the install's ID")
+        // an unsigned export never retries: there is no team to register the identifier to
+        try? fm.removeItem(atPath: state + "/calls.txt")
+        XCTAssertFalse(installer(f).export(framework: f.framework, titleID: titleID, name: "Test Game").ok)
+        XCTAssertEqual(calls.filter { $0.hasPrefix("xcodebuild") }.count, 1)
     }
 }

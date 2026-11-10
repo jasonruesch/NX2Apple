@@ -33,7 +33,10 @@ enum ShellLayout: Equatable {
 /// A presentation-only shell. Selection, focus, navigation and scroll positions are local UI state.
 /// All game effects are supplied by the host through actions.
 public struct LibraryView: View {
-    public let games: [GameDetail]
+    /// Every game the host gives, before the library leaves out those without game data (`games`).
+    public let allGames: [GameDetail]
+    @AppStorage(ShellSettingsStore.hideWithoutDataKey, store: ShellSettingsStore.current.defaults) private var hideWithoutData = true
+    var games: [GameDetail] { LibraryFilter.visible(allGames, hideWithoutData: hideWithoutData) }
     public let controllers: [ControllerInfo]
     public let globalPadMap: PadMap
     /// The controller's state while the button test is open, from the host.
@@ -88,7 +91,7 @@ public struct LibraryView: View {
                 globalPadMap: PadMap = PadMap(), padSnapshot: PadSnapshot? = nil,
                 initialPadMapping: String? = nil, initialButtonTestOpen: Bool = false) {
         ShellPalette.configureNativeAppearance()
-        self.games = games
+        self.allGames = games
         self.controllers = controllers
         self.globalPadMap = globalPadMap
         self.padSnapshot = padSnapshot
@@ -97,7 +100,7 @@ public struct LibraryView: View {
         self.actions = actions
         self.input = input
         _inputSeen = State(initialValue: input.last)
-        let first = initialSelection ?? games.first?.id
+        let first = initialSelection ?? LibraryFilter.visible(games, hideWithoutData: ShellSettingsStore.current.hidesGamesWithoutData).first?.id
         _selectedID = State(initialValue: first)
         _settingsOpen = State(initialValue: initialDetailOpen)
         _settingsArrived = State(initialValue: initialDetailOpen)

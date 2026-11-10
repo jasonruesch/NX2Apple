@@ -32,12 +32,14 @@ package struct ExportSteps: View {
     private var toDrive: Bool { devices.sendWhere == SendWhere.drive }
     private var gameName: String { build.gameName }
     private var oneGame: Bool { devices.exportOneGame }
+    /// The shared app's IPA is signed for a team (a one-game IPA is always unsigned).
+    private var signed: Bool { !oneGame && !devices.ipaTeam.isEmpty }
 
     package var body: some View {
         VStack(spacing: 0) {
             step(1, exported ? .done : .current, title: loc.t("shell.step1Title"),
-                 sub: exported ? String(format: loc.t(oneGame ? "shell.oneGameDone" : "shell.step1Done"), build.exportedIPAText)
-                               : loc.t(oneGame ? "shell.oneGameSub" : "shell.step1Sub")) {
+                 sub: exported ? String(format: loc.t(oneGame ? "shell.oneGameDone" : signed ? "shell.step1DoneSigned" : "shell.step1Done"), build.exportedIPAText)
+                               : loc.t(oneGame ? "shell.oneGameSub" : signed ? "shell.step1SubSigned" : "shell.step1Sub")) {
                 if exported {
                     action(loc.t("shell.showInFinder")) { revealInFinder(build.exportedIPAPath) }
                 } else {
@@ -52,7 +54,7 @@ package struct ExportSteps: View {
             }
             CardDivider()
             step(2, sentDone ? .done : exported ? .current : .upcoming, title: loc.t("shell.step2Title"),
-                 sub: loc.t(oneGame ? "shell.oneGameStep2Sub" : "shell.step2Sub")) { EmptyView() }
+                 sub: loc.t(oneGame ? "shell.oneGameStep2Sub" : signed ? "shell.step2SubSigned" : "shell.step2Sub")) { EmptyView() }
             if !oneGame { CardDivider(); sendStep }
         }
     }

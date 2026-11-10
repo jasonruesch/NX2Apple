@@ -205,9 +205,10 @@ final class GameLibrary: ObservableObject {
         VolumePath.onUnmounted(path, volumes: volumes)
     }
 
-    /// Forgets a remembered Mac app, IPA or iOS app that is gone from disk, so nothing points at it. A file on a drive that is not
+    /// Forgets a remembered Mac app, IPA or iOS app that is gone from disk, so nothing points at it, and a game file (base, update,
+    /// DLC, keys) that was moved or renamed, so the next scan fills its slot from where it is now. A file on a drive that is not
     /// connected is kept (the game is just not ready until the drive is back); one missing from a mounted volume is cleared. Saves only
-    /// when something changed; run on load and after a scan, never from a view.
+    /// when something changed; run on load and before and after a scan, never from a view.
     func pruneMissingPaths(volumes: String = "/Volumes") {
         let fm = FileManager.default
         func gone(_ path: String, plist: Bool = false) -> Bool {
@@ -219,6 +220,9 @@ final class GameLibrary: ObservableObject {
             if gone(game.appPath) { games[index].appPath = ""; changed = true }
             if gone(game.ipaPath) { games[index].ipaPath = ""; changed = true }
             if gone(game.iosAppPath, plist: true) { games[index].iosAppPath = ""; games[index].installedDevice = ""; changed = true }
+            for (slot, paths) in game.inputs where paths.contains(where: { gone($0) }) {
+                games[index].inputs[slot] = paths.filter { !gone($0) }; changed = true
+            }
         }
         if changed { save() }
     }
@@ -428,10 +432,15 @@ final class GameLibrary: ObservableObject {
             // Roots in their order: the first one that holds a game is its source, so the library does not depend on scan timing
             let sources = Self.firstOfEach(roots.flatMap { Self.sourceGames(in: $0, repo: repo, headerKey: headerKey) }) { $0.titleID }
             DispatchQueue.main.async {
+                self.pruneMissingPaths()   // a game file moved or renamed since: its slot is empty, so the scan below fills it
                 let previousSelection = self.selectedID
                 for source in sources {
                     if var existing = self.games.first(where: { $0.titleID == source.titleID }) {
-                        if existing.inputs["base", default: []].isEmpty { existing.inputs = source.inputs }
+                        if existing.inputs["base", default: []].isEmpty {   // the scan's files; a keys file it did not find (outside the library folder) stays
+                            let keys = existing.inputs["keys", default: []]
+                            existing.inputs = source.inputs
+                            if existing.inputs["keys", default: []].isEmpty, !keys.isEmpty { existing.inputs["keys"] = keys }
+                        }
                         else {
                             // Slots the library has empty and the scan fills: an update or DLC added since, or a game
                             // recorded before the scan climbed out of a "nsp本体" folder (nothing was found beside it then).
