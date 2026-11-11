@@ -25,6 +25,26 @@ final class ShellExportCaptureTests: IsolatedDefaultsTestCase {
         try handle.close()
         defer { try? fm.removeItem(at: shellFolder) }
 
+        // The shared app the list under step 1 reads: a made-up library, never the Mac's own. Two games in the last IPA, one built since,
+        // one whose build files are gone.
+        testDefaults.set(shellFolder.path, forKey: "shellRoot")
+        let built = Date(timeIntervalSince1970: 1_793_000_000)
+        var library = ShellLibrary()
+        for (index, (titleID, name)) in [("0100000000010000", "Super Mario Odyssey [0100000000010000][v0]"), ("01006F8002326000", "Animal Crossing: New Horizons"),
+                                         ("010093801237C000", "Metroid Dread [010093801237C000][v0][Base]"), ("0100F2C0115B6000", "The Legend of Zelda: Tears of the Kingdom")].enumerated() {
+            let framework = shellFolder.path + "/frameworks/\(titleID).framework"
+            if index < 3 {
+                try fm.createDirectory(atPath: framework, withIntermediateDirectories: true)
+                try fm.setAttributes([.modificationDate: built.addingTimeInterval(index == 2 ? 7200 : 0)], ofItemAtPath: framework)
+            }
+            library.add(.init(titleID: titleID, name: name, framework: framework))
+        }
+        try library.save(root: shellFolder.path)
+        let lastIPA = ShellInstall.ipaPath(root: shellFolder.path)
+        try fm.createDirectory(atPath: (lastIPA as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        fm.createFile(atPath: lastIPA, contents: Data("ipa".utf8))
+        try fm.setAttributes([.modificationDate: built.addingTimeInterval(3600)], ofItemAtPath: lastIPA)
+
         let stores = LauncherStores(defaults: testDefaults); let model = stores.build
         stores.localizer.lang = lang
         model.target = "ios"

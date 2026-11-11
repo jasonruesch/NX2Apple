@@ -84,14 +84,26 @@ package enum DriveCopy {
     /// and a space, dot, `+`, `-` or `_` left at either end is dropped (Windows and FAT drop a trailing dot). A name with nothing left
     /// is the title ID alone.
     package static func namedFolder(titleID: String, name: String) -> String {
-        let untagged = name.replacingOccurrences(of: "\\[[^\\]]*\\]|\\(\\s*[0-9A-Fa-f]{16}\\s*\\)|\\(\\s*[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+\\s*\\)",
-                                                 with: " ", options: .regularExpression)
+        let untagged = untag(name)
         let refused = CharacterSet(charactersIn: "/\\:*?\"<>|").union(.controlCharacters)
         let spaced = String(untagged.unicodeScalars.map { refused.contains($0) ? " " : Character($0) })
         var cleaned = spaced.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         if cleaned.count > maxNameLength { cleaned = String(cleaned.prefix(maxNameLength)) }
         cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: " .+-_"))
         return cleaned.isEmpty ? titleID : cleaned + " (" + titleID + ")"
+    }
+
+    /// The name without the tags a dump's file name carries: `[…]` groups (`[0100…]`, `[v0]`, `[Base]`), a `(<title ID>)`, and a
+    /// site's name such as `(example.xyz)`. Each becomes a space, for the caller to fold.
+    package static func untag(_ name: String) -> String {
+        name.replacingOccurrences(of: "\\[[^\\]]*\\]|\\(\\s*[0-9A-Fa-f]{16}\\s*\\)|\\(\\s*[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+\\s*\\)",
+                                  with: " ", options: .regularExpression)
+    }
+
+    /// A game's name as the launcher shows it: without a dump's tags, runs of spaces folded, and no `+`, `-` or `_` left at either
+    /// end. Unlike a folder name it keeps every character, and a trailing dot ("Bros."). Empty when nothing is left.
+    package static func displayName(_ name: String) -> String {
+        untag(name).split(whereSeparator: \.isWhitespace).joined(separator: " ").trimmingCharacters(in: CharacterSet(charactersIn: " +-_"))
     }
 
     /// The game's folder under the other naming, when the drive holds it and the chosen one is not there yet: the title ID folder when
