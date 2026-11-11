@@ -27,6 +27,21 @@ public struct EngineLaunchPlan: Equatable, Sendable {
     /// environment, game env.txt, game mods folder, shared env.txt, framework dm/env.txt.
     /// The framework file carries build-time defaults such as CPU BC decoding for older GPUs (#719). Automatic `DM_PSO_BUNDLE`
     /// discovery is a fallback after all env files, so an explicit archive path or `off` can override it.
+    /// The `msl/` folder beside the game's data (on a drive or in a picked folder, next to the RomFS), used when the game's
+    /// app folder has no `msl/` of its own. It counts only when it holds the libraries of the chain this game was built with
+    /// (`b-<chain>.img` or `b-<chain>/`, or `vk/` or `gl/` for a Vulkan or GL game): shaders copied for an older build of the
+    /// game's code would not load, so the bundled ones are used instead.
+    static func dataShaders(for game: LaunchableGame, fileManager fm: FileManager = .default) -> URL? {
+        let msl = game.dataURL.appendingPathComponent("msl", isDirectory: true)
+        let chain = game.manifest.chain
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: msl.appendingPathComponent(chain + ".img").path, isDirectory: &isDir), !isDir.boolValue { return msl }
+        for folder in [chain, "vk", "gl"] {
+            if fm.fileExists(atPath: msl.appendingPathComponent(folder).path, isDirectory: &isDir), isDir.boolValue { return msl }
+        }
+        return nil
+    }
+
     public static func make(game: LaunchableGame, appResources: URL, documents: URL, envFileText: String?, gameEnvFileText: String? = nil,
                             fileManager fm: FileManager = .default) -> EngineLaunchPlan {
         let manifest = game.manifest, fw = game.frameworkURL, gdir = game.appFolder
@@ -47,7 +62,7 @@ public struct EngineLaunchPlan: Equatable, Sendable {
         env["DM_NVN_SHMAP"] = fw.appendingPathComponent(manifest.shaderMap).path
         let ownMSL = gdir.appendingPathComponent("msl", isDirectory: true)
         let bundledMSL = game.shaderResourcesURL ?? fw.appendingPathComponent("msl", isDirectory: true)
-        env["DM_MSL_DIR"] = (isDirectory(ownMSL) ? ownMSL : bundledMSL).path
+        env["DM_MSL_DIR"] = (isDirectory(ownMSL) ? ownMSL : dataShaders(for: game, fileManager: fm) ?? bundledMSL).path
         let ownPSO = gdir.appendingPathComponent("pso", isDirectory: true), fwPSO = fw.appendingPathComponent("pso", isDirectory: true)
         let dataAOC = game.dataURL.appendingPathComponent("aoc", isDirectory: true), ownAOC = gdir.appendingPathComponent("aoc", isDirectory: true)
         if isDirectory(dataAOC) { env["DM_AOC_DIR"] = dataAOC.path } else if isDirectory(ownAOC) { env["DM_AOC_DIR"] = ownAOC.path }
