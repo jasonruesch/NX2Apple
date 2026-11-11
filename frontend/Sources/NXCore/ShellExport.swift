@@ -232,7 +232,7 @@ extension ShellInstaller {
         var target = signed ? device : ""
         func build(_ bundleID: String) -> ToolResult {
             run(ShellInstall.exportBuildCommand(xcrun: xcrun, root: root, bundleID: bundleID, team: exportTeam, device: target), env: nil,
-                label: buildName, step: BuildProgress.xcodeStep)
+                label: buildName, stageID: Self.exportBuildStageID, step: BuildProgress.xcodeStep)
         }
         var bundleID = exportBundleID.isEmpty ? library.bundleID : exportBundleID
         var built = build(bundleID)
@@ -273,7 +273,7 @@ extension ShellInstaller {
     /// Stage and zip Payload/<app>.app. Signing can add _CodeSignature/ and CodeResources, so reserve two ZIP32 entries.
     /// `teamSigned`: Xcode signed `app` for a team, and the staged copy is signed again with the same identity and entitlements.
     func packExport(app: URL, library: ShellLibrary, notes: [String] = [], bundleID: String? = nil, teamSigned: Bool = false,
-                    entryLimit: Int = Int(UInt16.max) - 2) -> Outcome {
+                    entryLimit: Int = ShellExport.entryLimit, hardLimit: Int = ShellExport.entryLimit) -> Outcome {
         let fm = FileManager.default
         let packName = t("shell.exportPackStage")
         begin(Self.exportPackStageID, packName)
@@ -285,8 +285,12 @@ extension ShellInstaller {
             try? fm.removeItem(atPath: ipa)
             try fm.createDirectory(atPath: stage + "/Payload", withIntermediateDirectories: true)
             try fm.copyItem(at: app, to: stagedApp)
-            if try Self.exceedsEntryLimit(in: stagedApp.deletingLastPathComponent(), limit: entryLimit) {
+            let payload = stagedApp.deletingLastPathComponent()
+            if try ShellExport.exceedsEntryLimit(in: payload, limit: entryLimit) {
                 packed = try packShaderLibraries(in: stagedApp, games: library.games, label: packName)
+                if try ShellExport.exceedsEntryLimit(in: payload, limit: hardLimit) {
+                    throw ShellExport.entryLimitExceededError(limit: hardLimit)
+                }
             }
         } catch {
             try? fm.removeItem(atPath: stage)
@@ -325,48 +329,20 @@ extension ShellInstaller {
         return outcome
     }
 
-    private static func exceedsEntryLimit(in payload: URL, limit: Int) throws -> Bool {
-        var failure: Error?
-        guard let entries = FileManager.default.enumerator(at: payload, includingPropertiesForKeys: [], errorHandler: { _, error in
-            failure = error
-            return false
-        }) else {
-            throw failure ?? CocoaError(.fileReadUnknown, userInfo: [NSFilePathErrorKey: payload.path])
-        }
-        var count = 1   // ditto --keepParent writes Payload/ itself, then DmShell.app/ and its descendants.
-        while count <= limit, entries.nextObject() != nil { count += 1 }
-        if let failure { throw failure }
-        return count > limit
-    }
-
     /// Keep a large IPA within the sideloader's 16-bit entry count. Only the games in the shell library
     /// know how to unpack an archive. Leave other frameworks' resources in their original layout.
     /// Returns the frameworks it changed.
     private func packShaderLibraries(in stagedApp: URL, games: [ShellLibrary.Game], label: String) throws -> [URL] {
-        let fm = FileManager.default
-        var changed: [URL] = []
-        let frameworks = stagedApp.appendingPathComponent("Frameworks")
-        for game in games {
-            let framework = frameworks.appendingPathComponent(URL(fileURLWithPath: game.framework).lastPathComponent)
-            let shaders = framework.appendingPathComponent("msl")
-            var directory: ObjCBool = false
-            guard fm.fileExists(atPath: shaders.path, isDirectory: &directory), directory.boolValue else { continue }
-            // A re-used framework can already contain a packed copy. The loose tree supplies this export's contents.
-            for old in try fm.contentsOfDirectory(at: framework, includingPropertiesForKeys: nil) where old.pathExtension == "aar" {
-                let stem = old.deletingPathExtension().lastPathComponent
-                if stem.hasPrefix("msl-"), UUID(uuidString: String(stem.dropFirst(4))) != nil { try fm.removeItem(at: old) }
-            }
-            let archive = framework.appendingPathComponent("msl-\(UUID().uuidString).aar")
-            let result = run(["/usr/bin/aa", "archive", "-d", shaders.path, "-o", archive.path, "-a", "lzfse"],
-                             env: nil, label: label, step: { _ in nil })
-            guard result.status == 0, fm.fileExists(atPath: archive.path) else {
-                let reason = result.lastError ?? ShellInstall.scriptFailure(result.output) ?? fmt("msg.exitCode", result.status)
-                throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: reason])
-            }
-            try fm.removeItem(at: shaders)
-            changed.append(framework)
-        }
-        return changed
+        let names = games.map { URL(fileURLWithPath: $0.framework).lastPathComponent }
+        return try ShellExport.packShaderLibraries(
+            in: stagedApp,
+            frameworkNames: names,
+            runArchive: { command in
+                let result = run(command, env: nil, label: label, step: { _ in nil })
+                return (result.status, result.output, result.lastError)
+            },
+            exitCodeMessage: { fmt("msg.exitCode", $0) }
+        )
     }
 
     /// Signs the staged app again as Xcode signed `built`: the same identity (found by its certificate) and the same entitlements,
@@ -440,5 +416,88 @@ extension ShellInstaller {
             outcome.failure = nil   // the install's Retry card does not fit: nothing of the install ran
         }
         return outcome
+    }
+}
+
+/// Shared IPA staging helpers used by both unsigned exports (`ShellInstaller.packExport`) and signed app exports (`BuildStore.saveIPA`).
+package enum ShellExport {
+    /// Signing can add `_CodeSignature/` and `CodeResources`, so reserve two entries below the 16-bit ZIP32 ceiling.
+    package static let entryLimit = Int(UInt16.max) - 2
+
+    package static func exceedsEntryLimit(in payload: URL, limit: Int = entryLimit) throws -> Bool {
+        var failure: Error?
+        guard let entries = FileManager.default.enumerator(at: payload, includingPropertiesForKeys: [], errorHandler: { _, error in
+            failure = error
+            return false
+        }) else {
+            throw failure ?? CocoaError(.fileReadUnknown, userInfo: [NSFilePathErrorKey: payload.path])
+        }
+        var count = 1   // ditto --keepParent writes Payload/ itself, then DmShell.app/ and its descendants.
+        while count <= limit, entries.nextObject() != nil { count += 1 }
+        if let failure { throw failure }
+        return count > limit
+    }
+
+    package static func entryLimitExceededError(limit: Int) -> Error {
+        CocoaError(.fileWriteUnknown, userInfo: [
+            NSLocalizedDescriptionKey: "IPA bundle exceeds the \(limit)-entry ZIP32 archive limit"
+        ])
+    }
+
+    /// Names the embedded `DmGame<titleID>.framework` bundles whose `msl/` trees `ShellHost` knows how to unpack from `.aar`.
+    package static func gameFrameworkNames(forApp appPath: String, stagedApp: URL, fm: FileManager = .default) -> [String] {
+        var seen = Set<String>()
+        var names: [String] = []
+        func append(_ name: String) {
+            if !name.isEmpty, seen.insert(name).inserted {
+                names.append(name)
+            }
+        }
+        if let shell = ShellInstall.paths(ofApp: appPath) {
+            for game in ShellLibrary.load(root: shell.root).games {
+                append(URL(fileURLWithPath: game.framework).lastPathComponent)
+            }
+        }
+        let frameworksDir = stagedApp.appendingPathComponent("Frameworks")
+        for item in (try? fm.contentsOfDirectory(atPath: frameworksDir.path))?.sorted() ?? []
+            where !ShellInstall.titleID(ofFramework: item).isEmpty {
+            append(item)
+        }
+        return names
+    }
+
+    /// Packs loose `msl/` directories inside the named game frameworks into `msl-<UUID>.aar` archives so the IPA stays within ZIP32 limits.
+    @discardableResult
+    package static func packShaderLibraries(
+        in stagedApp: URL,
+        frameworkNames: [String],
+        runArchive: ([String]) -> (status: Int32, output: String, lastError: String?),
+        exitCodeMessage: (Int32) -> String
+    ) throws -> [URL] {
+        let fm = FileManager.default
+        let frameworks = stagedApp.appendingPathComponent("Frameworks")
+        var packed = Set<String>()
+        var changed: [URL] = []
+        for name in frameworkNames where packed.insert(name).inserted {
+            let framework = frameworks.appendingPathComponent(name)
+            let shaders = framework.appendingPathComponent("msl")
+            var directory: ObjCBool = false
+            guard fm.fileExists(atPath: shaders.path, isDirectory: &directory), directory.boolValue else { continue }
+            for old in try fm.contentsOfDirectory(at: framework, includingPropertiesForKeys: nil) where old.pathExtension == "aar" {
+                let stem = old.deletingPathExtension().lastPathComponent
+                if stem.hasPrefix("msl-"), UUID(uuidString: String(stem.dropFirst(4))) != nil {
+                    try fm.removeItem(at: old)
+                }
+            }
+            let archive = framework.appendingPathComponent("msl-\(UUID().uuidString).aar")
+            let result = runArchive(["/usr/bin/aa", "archive", "-d", shaders.path, "-o", archive.path, "-a", "lzfse"])
+            guard result.status == 0, fm.fileExists(atPath: archive.path) else {
+                let reason = result.lastError ?? ShellInstall.scriptFailure(result.output) ?? exitCodeMessage(result.status)
+                throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: reason])
+            }
+            try fm.removeItem(at: shaders)
+            changed.append(framework)
+        }
+        return changed
     }
 }
