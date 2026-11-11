@@ -64,6 +64,37 @@ import Testing
         #expect(env["DM_PSO_BUNDLE"] == rig.gdir.path + "/pso")
     }
 
+    @Test(arguments: [".img", "/", "vk/", "gl/"]) func shadersBesideTheGameDataWinOverTheBundledOnes(layout: String) throws {
+        let rig = try Rig()
+        let msl = rig.data.appendingPathComponent("msl", isDirectory: true)
+        let name = layout == ".img" || layout == "/" ? rig.game.manifest.chain + layout : layout
+        if name.hasSuffix("/") { try rig.box.makeFolder(msl.appendingPathComponent(name)) }
+        else { try rig.box.write("library", to: msl.appendingPathComponent(name)) }
+        #expect(rig.plan().environment["DM_MSL_DIR"] == msl.path)
+        // The app folder's own shaders still come first.
+        try rig.box.makeFolder(rig.gdir.appendingPathComponent("msl"))
+        #expect(rig.plan().environment["DM_MSL_DIR"] == rig.gdir.path + "/msl")
+    }
+
+    @Test func shadersBesideTheGameDataForAnotherChainAreSkipped() throws {
+        var rig = try Rig()
+        let msl = rig.data.appendingPathComponent("msl", isDirectory: true)
+        try rig.box.write("old library", to: msl.appendingPathComponent("b-0ld.img"))
+        try rig.box.makeFolder(msl.appendingPathComponent(rig.game.manifest.chain + ".img"))   // a folder, not the image
+        #expect(rig.plan().environment["DM_MSL_DIR"] == rig.fw.path + "/msl")
+        rig.game.shaderResourcesURL = rig.gdir.appendingPathComponent(".shader-resources/msl-x")
+        #expect(rig.plan().environment["DM_MSL_DIR"] == rig.gdir.path + "/.shader-resources/msl-x")
+    }
+
+    @Test func shadersBesideTheGameDataSkipUnpackingTheBundledArchive() async throws {
+        let rig = try Rig()
+        // Not a real archive: unpacking it fails, so a launch that reaches the extraction throws.
+        try Data([0]).write(to: rig.fw.appendingPathComponent("msl-" + UUID().uuidString + ".aar"))
+        await #expect(throws: (any Error).self) { try await ShaderResources.shared.prepare(rig.game) }
+        try rig.box.write("library", to: rig.data.appendingPathComponent("msl/" + rig.game.manifest.chain + ".img"))
+        #expect(try await ShaderResources.shared.prepare(rig.game) == nil)
+    }
+
     @Test func psoFallsBackToTheFramework() throws {
         let rig = try Rig()
         try rig.box.makeFolder(rig.fw.appendingPathComponent("pso"))
