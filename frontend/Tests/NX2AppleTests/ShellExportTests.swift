@@ -226,6 +226,33 @@ import NXModel
         XCTAssertEqual(try entries(ofZip: overLimit.ipaPath).filter { $0.hasSuffix(".aar") }.count, 1)
     }
 
+    func testAnExportWithoutShadersLeavesThemOutAndMarksTheFramework() throws {
+        let f = try makeFixture(entitlements: false)
+        let app = ShellInstall.exportAppPath(root: f.root), game = "Frameworks/DmGame\(titleID).framework"
+        try write(app + "/" + game + "/msl/b-test.img", "library")
+        try write(app + "/" + game + "/msl-\(UUID().uuidString).aar", "an older packed copy")
+        var i = installer(f)
+        i.exportWithoutShaders = true
+        let outcome = pack(f, limit: 2, using: i)   // at this limit the shaders would be packed, if any were left
+        XCTAssertTrue(outcome.ok, outcome.message)
+        let names = try entries(ofZip: outcome.ipaPath)
+        XCTAssertFalse(names.contains { $0.contains("/msl") && !$0.hasSuffix(GameShaders.externalMarker) }, names.joined(separator: "\n"))
+        XCTAssertTrue(names.contains("Payload/DmShell.app/" + game + "/" + GameShaders.externalMarker), names.joined(separator: "\n"))
+        XCTAssertTrue(fm.fileExists(atPath: app + "/" + game + "/msl/b-test.img"), "the built app keeps its shaders")
+        XCTAssertEqual(GameShaders.externalMarker, "msl-with-game-data", "the iPhone app looks for this name")
+    }
+
+    func testAnExportWithShadersKeepsThemAndAddsNoMarker() throws {
+        let f = try makeFixture(entitlements: false)
+        let game = "Frameworks/DmGame\(titleID).framework"
+        try write(ShellInstall.exportAppPath(root: f.root) + "/" + game + "/msl/b-test.img", "library")
+        let outcome = pack(f, limit: 1000)
+        XCTAssertTrue(outcome.ok, outcome.message)
+        let names = try entries(ofZip: outcome.ipaPath)
+        XCTAssertTrue(names.contains("Payload/DmShell.app/" + game + "/msl/b-test.img"))
+        XCTAssertFalse(names.contains { $0.hasSuffix(GameShaders.externalMarker) })
+    }
+
     func testExportPacksEachGamesShaderBytesAndPreservesTheBuiltFrameworks() throws {
         let f = try makeFixture(entitlements: false)
         let app = ShellInstall.exportAppPath(root: f.root)
@@ -573,6 +600,23 @@ import NXModel
         XCTAssertEqual(progress.last?.0, 14)
         XCTAssertEqual(progress.last?.1, 14)
         XCTAssertFalse(calls.contains { $0.hasPrefix("xcodebuild") }, "nothing is built or signed")
+    }
+
+    func testAnIPAWithoutShadersSendsThemWithTheGameData() throws {
+        let f = try makeFixture()
+        let archive = try makeArchive()
+        try write(f.framework + "/msl/b-test.img", "library")
+        try ShellLibrary(games: [ShellLibrary.Game(titleID: titleID, name: "Test Game", framework: f.framework)]).save(root: f.root)
+        try listApps([("org.nxnative.shell.ABC123", "NX2Apple")])
+        var i = sender(f)
+        XCTAssertEqual(i.sendData(titleID: titleID, archive: archive).copied, 2, "an IPA with its shaders: the game data only")
+        XCTAssertFalse(fm.fileExists(atPath: archive + "/msl"))
+        i.exportWithoutShaders = true
+        try? fm.removeItem(atPath: state + "/calls.txt")
+        XCTAssertEqual(i.sendData(titleID: titleID, archive: archive).copied, 3)
+        XCTAssertEqual(try String(contentsOfFile: archive + "/msl/b-test.img", encoding: .utf8), "library")
+        XCTAssertTrue(calls.contains { $0.hasPrefix("devicectl device copy to") && $0.contains("Documents/games/\(titleID)/msl/") },
+                      calls.joined(separator: "\n"))
     }
 
     func testTheCopyBarStaysIndeterminateUntilBytesAreDone() throws {
@@ -1233,6 +1277,20 @@ import NXModel
         XCTAssertEqual(signs.count, 2, signs.joined(separator: "\n"))
         XCTAssertTrue(signs[0].hasSuffix("/Payload/DmShell.app/Frameworks/DmGame\(titleID).framework") && !signs[0].contains("--entitlements"), signs[0])
         XCTAssertTrue(signs[1].hasSuffix("/Payload/DmShell.app") && signs[1].contains("--entitlements"), signs[1])
+    }
+
+    func testASignedExportSignsTheFrameworksItLeftTheShadersOutOf() throws {
+        let f = try makeFixture(entitlements: false)
+        try write(ShellInstall.exportAppPath(root: f.root) + "/Frameworks/DmGame\(titleID).framework/msl/b-test.img", "library")
+        var i = try signedInstaller(f)
+        i.exportTeam = "ABCDE12345"
+        i.exportWithoutShaders = true
+        let library = ShellLibrary(games: [ShellLibrary.Game(titleID: titleID, name: "Test Game", framework: "DmGame\(titleID).framework")])
+        let outcome = i.packExport(app: URL(fileURLWithPath: ShellInstall.exportAppPath(root: f.root)), library: library, teamSigned: true)
+        XCTAssertTrue(outcome.ok, outcome.message)
+        let signs = codesignCalls.filter { $0.hasPrefix("--force") }
+        XCTAssertEqual(signs.count, 2, signs.joined(separator: "\n"))
+        XCTAssertTrue(signs[0].hasSuffix("/Payload/DmShell.app/Frameworks/DmGame\(titleID).framework"), signs[0])
     }
 
     func testASignedExportThatCannotSignStopsWithoutAnIPA() throws {

@@ -55,7 +55,7 @@ import Testing
     @Test func perGameFilesWinWhenPresent() throws {
         let rig = try Rig()
         try rig.box.write("x", to: rig.gdir.appendingPathComponent("profile.tsv"))
-        try rig.box.makeFolder(rig.gdir.appendingPathComponent("msl"))
+        try rig.box.write("library", to: rig.gdir.appendingPathComponent("msl/" + rig.game.manifest.chain + ".img"))
         try rig.box.makeFolder(rig.gdir.appendingPathComponent("pso"))
         try rig.box.makeFolder(rig.fw.appendingPathComponent("pso"))
         let env = rig.plan().environment
@@ -71,9 +71,36 @@ import Testing
         if name.hasSuffix("/") { try rig.box.makeFolder(msl.appendingPathComponent(name)) }
         else { try rig.box.write("library", to: msl.appendingPathComponent(name)) }
         #expect(rig.plan().environment["DM_MSL_DIR"] == msl.path)
-        // The app folder's own shaders still come first.
+        // The app folder's own shaders come first, once they are the game's chain.
         try rig.box.makeFolder(rig.gdir.appendingPathComponent("msl"))
+        #expect(rig.plan().environment["DM_MSL_DIR"] == msl.path)
+        try rig.box.write("library", to: rig.gdir.appendingPathComponent("msl/" + rig.game.manifest.chain + ".img"))
         #expect(rig.plan().environment["DM_MSL_DIR"] == rig.gdir.path + "/msl")
+    }
+
+    @Test func staleShadersInTheAppFolderFallBackToTheBundledOnes() throws {
+        let rig = try Rig()
+        try rig.box.write("old library", to: rig.gdir.appendingPathComponent("msl/b-0ld.img"))
+        #expect(rig.plan().environment["DM_MSL_DIR"] == rig.fw.path + "/msl")
+    }
+
+    @Test func anIPAWithoutShadersNeedsThemBesideTheGameData() throws {
+        let rig = try Rig()
+        let chain = rig.game.manifest.chain
+        func missing() -> Bool {
+            EngineLaunchPlan.shadersMissing(framework: rig.fw, chain: chain, appFolder: rig.gdir, dataFolder: rig.data)
+        }
+        #expect(!missing())   // an IPA with its shaders
+        try rig.box.write("", to: rig.fw.appendingPathComponent(EngineLaunchPlan.externalShadersMarker))
+        #expect(missing())
+        #expect(EngineLaunchPlan.shadersMissing(framework: rig.fw, chain: chain, appFolder: rig.gdir, dataFolder: nil))
+        try rig.box.write("old library", to: rig.data.appendingPathComponent("msl/b-0ld.img"))
+        #expect(missing())
+        try rig.box.write("library", to: rig.data.appendingPathComponent("msl/" + chain + ".img"))
+        #expect(!missing())
+        try FileManager.default.removeItem(at: rig.data.appendingPathComponent("msl"))
+        try rig.box.write("library", to: rig.gdir.appendingPathComponent("msl/" + chain + ".img"))
+        #expect(!missing())
     }
 
     @Test func shadersBesideTheGameDataForAnotherChainAreSkipped() throws {

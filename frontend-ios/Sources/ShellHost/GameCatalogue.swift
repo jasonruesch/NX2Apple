@@ -299,11 +299,13 @@ public enum DataLocator {
 /// Derives the state a tile shows from what is present: a bundle that cannot run is broken with its reason, a game
 /// built for another chain (when its framework has no host of its own) or a newer OS needs an app update, a game without reachable data needs game data.
 public enum GameStateResolver {
-    public static func state(for entry: CatalogueEntry, data: DataResolution, environment: HostEnvironment) -> GameState {
+    /// `shadersMissing`: the IPA left the game's shaders out and they are not with its data (EngineLaunchPlan.shadersMissing), so
+    /// the game needs its game data again, which carries them.
+    public static func state(for entry: CatalogueEntry, data: DataResolution, environment: HostEnvironment, shadersMissing: Bool = false) -> GameState {
         if let problem = entry.problem { return problem.state }
         guard let manifest = entry.manifest else { return GameProblem(cause: .manifestMissing, reason: hostText("Game manifest missing")).state }
         if manifest.loader != "FH", let chain = environment.chain, chain != manifest.chain { return .needsAppUpdate }
         if let min = manifest.minOSVersion, !isVersion(environment.osVersion, atLeast: min) { return .needsAppUpdate }
-        return data.found ? .playable : .needsGameData
+        return data.found && !shadersMissing ? .playable : .needsGameData
     }
 }
