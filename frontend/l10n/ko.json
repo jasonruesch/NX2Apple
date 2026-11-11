@@ -1,12 +1,5 @@
 {
-  "_language": {
-    "locales": [
-      "ko",
-      "korean",
-      "한국어"
-    ],
-    "name": "한국어"
-  },
+  "_language": {"locales": ["ko", "korean", "한국어"], "name": "한국어"},
   "activity.ios": "iPhone 빌드 진행 중",
   "activity.mac": "Mac 빌드 진행 중",
   "activity.transfer": "게임 파일을 iPhone으로 전송하는 중",
@@ -113,7 +106,7 @@
   "buildfiles.remove": "제거",
   "buildfiles.removeNamed": "%@의 빌드 파일 제거",
   "buildfiles.removing": "제거 중…",
-  "buildfiles.stays": "로그, 개발 빌드의 저장 데이터, 변환된 게임 파일은 유지됩니다.",
+  "buildfiles.stays": "로그와 개발 빌드의 저장 데이터는 유지됩니다.",
   "buildfiles.title": "빌드 파일 제거",
   "buildfiles.total": "합계",
   "cheats.alwaysOn": "항상 켜짐",
@@ -866,6 +859,9 @@
   "fail.a32Program.next": "프로필에 나열된 업데이트를 선택하세요.",
   "fail.a32Program.what": "이 버전은 32비트라 Apple silicon에서 실행할 수 없습니다.",
   "fail.a32Program.whatNamed": "%@의 이 버전은 32비트라 Apple silicon에서 실행할 수 없습니다.",
+  "fail.appIDLimit.next": "지금 다시 빌드해도 해결되지 않으며 새 번들 ID를 만들면 다음 한도만 더 빨리 소모됩니다. 이전 App ID가 7일 후 만료될 때까지 기다리거나 이 제한이 없는 유료 Apple Developer 팀으로 서명하세요. 모든 게임이 하나의 App ID를 함께 쓰는 공유 앱 모드를 사용하면 한도 안에서 유지할 수 있습니다.",
+  "fail.appIDLimit.what": "무료 Apple ID가 7일 동안 허용된 App ID 10개를 모두 사용했습니다(Apple 오류 9120).",
+  "fail.appIDLimit.whatUntil": "무료 Apple ID가 7일 동안 허용된 App ID 10개를 모두 사용했습니다(Apple 오류 9120). 가장 오래된 항목은 %@에 해제됩니다.",
   "fail.buildAnyway": "그래도 빌드…",
   "fail.cloudFolder.button": "다른 폴더 선택",
   "fail.cloudFolder.next": "클라우드 폴더는 모든 파일에 숨겨진 데이터를 추가합니다. 빌드 끝의 서명 단계가 이를 거부합니다. 게임 파일을 iCloud Drive 밖으로 옮기거나 저장 위치에서 그 밖의 폴더를 선택한 뒤 다시 빌드하세요.",
@@ -982,7 +978,7 @@
   "free.failed": "일부 파일을 제거하지 못했습니다: %@",
   "free.freed": "%@을(를) 확보했습니다.",
   "free.kept": "유지됨",
-  "free.keptNote": "로그, 게임 프로필, 변환된 NSP, 저장 데이터",
+  "free.keptNote": "로그, 게임 프로필, 저장 데이터",
   "free.measuring": "측정 중…",
   "free.menu": "공간 확보…",
   "free.note": "이 게임의 빌드 파일을 제거합니다. 다음 빌드가 다시 만듭니다. 앱, IPA, 게임 데이터 아카이브, NSP는 그대로 남습니다.",
@@ -1485,6 +1481,8 @@
   "launch.set.DM_TOUCH_STICK": "왼쪽 스틱",
   "launch.set.DM_TOUCH_STICK.note": "화면 속 컨트롤에서 왼쪽 스틱이 놓이는 위치입니다.",
   "launch.set.DM_UPSCALER": "게임 업스케일러",
+  "launch.set.MAC_GAME_MODE": "macOS 게임 모드",
+  "launch.set.MAC_GAME_MODE.note": "전체 화면에서 Bluetooth 컨트롤러 폴링 속도를 높이고 오디오 지연 시간을 줄입니다. 몇 분 뒤 프레임이 떨어지는 Mac에서는 꺼 두세요 (macOS가 GPU를 낮은 클럭으로 고정할 수 있습니다).",
   "launch.title": "실행 옵션",
   "launch.useForNew": "새 게임에 사용",
   "launch.useForNewDone": "저장했습니다. 지금부터 추가하는 게임은 이 설정으로 시작합니다.",

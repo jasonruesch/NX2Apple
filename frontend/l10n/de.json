@@ -1,13 +1,5 @@
 {
-  "_language": {
-    "locales": [
-      "de",
-      "german",
-      "deutsch"
-    ],
-    "name": "Deutsch",
-    "order": 3
-  },
+  "_language": {"locales": ["de", "german", "deutsch"], "name": "Deutsch", "order": 3},
   "activity.ios": "iPhone-Build läuft",
   "activity.mac": "Mac-Build läuft",
   "activity.transfer": "Spieldaten werden zum iPhone übertragen",
@@ -114,7 +106,7 @@
   "buildfiles.remove": "Entfernen",
   "buildfiles.removeNamed": "Build-Dateien von %@ entfernen",
   "buildfiles.removing": "Wird entfernt…",
-  "buildfiles.stays": "Protokolle, Spielstände von Entwicklungs-Builds und konvertierte Spieldateien bleiben erhalten.",
+  "buildfiles.stays": "Protokolle und Spielstände von Entwicklungs-Builds bleiben erhalten.",
   "buildfiles.title": "Build-Dateien entfernen",
   "buildfiles.total": "Gesamt",
   "cheats.alwaysOn": "Immer an",
@@ -867,6 +859,9 @@
   "fail.a32Program.next": "Wähle das Update, das das Profil nennt.",
   "fail.a32Program.what": "Diese Version ist 32-Bit und läuft nicht auf Apple Silicon.",
   "fail.a32Program.whatNamed": "Diese Version von %@ ist 32-Bit und läuft nicht auf Apple Silicon.",
+  "fail.appIDLimit.next": "Ein erneutes Bauen hilft jetzt nicht, und neue Bundle-IDs verbrauchen künftige Plätze nur schneller. Warte 7 Tage auf das Ablaufen einer älteren App-ID oder signiere mit einem kostenpflichtigen Apple-Developer-Team ohne dieses Limit. Baue für die gemeinsame App, damit sich alle Spiele eine einzige App-ID teilen.",
+  "fail.appIDLimit.what": "Deine kostenlose Apple-ID hat alle 10 App-IDs verbraucht, die in 7 Tagen erlaubt sind (Apple-Fehler 9120).",
+  "fail.appIDLimit.whatUntil": "Deine kostenlose Apple-ID hat alle 10 App-IDs verbraucht, die in 7 Tagen erlaubt sind (Apple-Fehler 9120). Die älteste wird am %@ wieder frei.",
   "fail.buildAnyway": "Trotzdem bauen …",
   "fail.cloudFolder.button": "Anderen Ordner wählen",
   "fail.cloudFolder.next": "Cloud-Ordner fügen jeder Datei versteckte Zusatzdaten hinzu. Der Signierschritt am Ende des Builds lehnt sie ab. Verschiebe deine Spieldateien aus iCloud Drive heraus oder wähle unter „Sichern in“ einen Ordner außerhalb. Baue dann erneut.",
@@ -983,7 +978,7 @@
   "free.failed": "Einige Dateien konnten nicht entfernt werden: %@",
   "free.freed": "%@ freigegeben.",
   "free.kept": "Bleibt erhalten",
-  "free.keptNote": "Protokolle, das Profil des Spiels, konvertierte NSPs und Spielstände",
+  "free.keptNote": "Protokolle, das Profil des Spiels und Spielstände",
   "free.measuring": "Wird gemessen …",
   "free.menu": "Speicherplatz freigeben …",
   "free.note": "Entfernt die Build-Dateien dieses Spiels, die der nächste Build neu erstellt. Die App, die IPA, das Archiv der Spieldaten und die NSPs bleiben erhalten.",
@@ -1486,6 +1481,8 @@
   "launch.set.DM_TOUCH_STICK": "Linker Stick",
   "launch.set.DM_TOUCH_STICK.note": "Wo der linke Stick der Bildschirmsteuerung sitzt.",
   "launch.set.DM_UPSCALER": "Upscaler des Spiels",
+  "launch.set.MAC_GAME_MODE": "macOS-Spielmodus",
+  "launch.set.MAC_GAME_MODE.note": "Verdoppelt im Vollbild die Bluetooth-Abtastrate für Controller und senkt die Audiolatenz. Ausgeschaltet lassen, wenn die Bildrate nach einigen Minuten einbricht (macOS kann die GPU auf niedrigem Takt halten).",
   "launch.title": "Startoptionen",
   "launch.useForNew": "Für neue Spiele",
   "launch.useForNewDone": "Gespeichert. Spiele, die du ab jetzt hinzufügst, starten damit.",

@@ -1,12 +1,5 @@
 {
-  "_language": {
-    "locales": [
-      "pt-br",
-      "pt",
-      "portuguese"
-    ],
-    "name": "Português (Brasil)"
-  },
+  "_language": {"locales": ["pt-br", "pt", "portuguese"], "name": "Português (Brasil)"},
   "activity.ios": "Build do iPhone em andamento",
   "activity.mac": "Build do Mac em andamento",
   "activity.transfer": "Transferindo os arquivos do jogo para o iPhone",
@@ -113,7 +106,7 @@
   "buildfiles.remove": "Remover",
   "buildfiles.removeNamed": "Remover os arquivos de build de %@",
   "buildfiles.removing": "Removendo…",
-  "buildfiles.stays": "Os logs, os saves de builds de desenvolvimento e os arquivos de jogo convertidos são mantidos.",
+  "buildfiles.stays": "Os logs e os saves de builds de desenvolvimento são mantidos.",
   "buildfiles.title": "Remover arquivos de build",
   "buildfiles.total": "Total",
   "cheats.alwaysOn": "Sempre ativado",
@@ -866,6 +859,9 @@
   "fail.a32Program.next": "Escolha a atualização que o perfil lista.",
   "fail.a32Program.what": "Esta versão é de 32 bits e não pode rodar no Apple silicon.",
   "fail.a32Program.whatNamed": "Esta versão de %@ é de 32 bits e não pode rodar no Apple silicon.",
+  "fail.appIDLimit.next": "Recompilar agora não vai ajudar, e novos bundle IDs só gastam vagas futuras mais rápido. Aguarde um App ID antigo expirar após 7 dias ou assine com uma equipe paga do Apple Developer, que não tem esse limite. Compile para o app compartilhado para que todos os jogos usem um único App ID.",
+  "fail.appIDLimit.what": "Seu ID Apple gratuito usou todos os 10 App IDs permitidos em 7 dias (erro 9120 da Apple).",
+  "fail.appIDLimit.whatUntil": "Seu ID Apple gratuito usou todos os 10 App IDs permitidos em 7 dias (erro 9120 da Apple). O mais antigo será liberado em %@.",
   "fail.buildAnyway": "Compilar mesmo assim…",
   "fail.cloudFolder.button": "Escolher outra pasta",
   "fail.cloudFolder.next": "Pastas na nuvem adicionam dados ocultos a cada arquivo. A etapa de assinatura no fim do build recusa isso. Tire os arquivos do jogo do iCloud Drive ou escolha uma pasta fora dele em Salvar em. Depois faça o build de novo.",
@@ -982,7 +978,7 @@
   "free.failed": "Alguns arquivos não puderam ser removidos: %@",
   "free.freed": "%@ liberados.",
   "free.kept": "Mantido",
-  "free.keptNote": "Registros, o perfil do jogo, NSPs convertidos e saves",
+  "free.keptNote": "Registros, o perfil do jogo e saves",
   "free.measuring": "Medindo…",
   "free.menu": "Liberar espaço…",
   "free.note": "Remove os arquivos de build deste jogo, que o próximo build cria de novo. O app, o IPA, o arquivo de dados do jogo e os NSPs ficam.",
@@ -1485,6 +1481,8 @@
   "launch.set.DM_TOUCH_STICK": "Analógico esquerdo",
   "launch.set.DM_TOUCH_STICK.note": "Onde fica o analógico esquerdo dos controles na tela.",
   "launch.set.DM_UPSCALER": "Upscaler do jogo",
+  "launch.set.MAC_GAME_MODE": "Modo Jogo do macOS",
+  "launch.set.MAC_GAME_MODE.note": "Dobra a taxa Bluetooth dos controles e reduz a latência de áudio em tela cheia. Deixe desativado se a taxa de quadros cair após alguns minutos no seu Mac (o macOS pode manter a GPU em clock baixo).",
   "launch.title": "Opções de inicialização",
   "launch.useForNew": "Para jogos novos",
   "launch.useForNewDone": "Salvo. Os jogos que você adicionar daqui em diante começam com isto.",

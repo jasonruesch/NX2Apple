@@ -158,6 +158,25 @@ class Ld64Test(unittest.TestCase):
         self.assertEqual(again, got)
         self.assertEqual(note2, '')
 
+    def test_a_path_folder_that_refuses_stat_is_skipped(self) -> None:
+        """Windows answers stat in some PATH folders with an error that is not "no such file"."""
+        llvm = make_fake_llvm(self.root, with_lld64=False, with_macho=True)
+        os.environ['NSPB_LLVM_DIR'] = str(llvm)
+        closed = self.root / 'closed'
+        closed.mkdir()
+        os.environ['PATH'] = str(closed) + os.pathsep + os.environ.get('PATH', '')
+        real_stat = os.stat
+
+        def stat(path, *args, **kwargs):
+            if Path(os.fspath(path)).parent == closed:
+                raise OSError(22, 'The path cannot be traversed because it contains an untrusted mount point')
+            return real_stat(path, *args, **kwargs)
+
+        with mock.patch('os.stat', stat):
+            self.assertIsNone(tc.ld64_lld())
+            got, _note = tc.ensure_ld64_lld()
+        self.assertEqual(got, llvm / 'bin/ld64.lld.exe')
+
     def test_existing_ld64_lld_wins(self) -> None:
         llvm = make_fake_llvm(self.root, with_lld64=True)
         os.environ['NSPB_LLVM_DIR'] = str(llvm)
@@ -4020,6 +4039,10 @@ class WindowsBuildFixesTest(unittest.TestCase):
                 self.assertEqual(Path(m.archive_path), dest)
                 self.assertEqual((dest / 'romfs.img').read_bytes(), img_new)
                 self.assertEqual((dest / 'romfs.img.id').read_bytes(), id_bytes)
+                self.assertFalse((v0 / 'RomFS.img').exists())
+                self.assertFalse((v65536 / 'RomFS.img').exists())
+                self.assertFalse((v131072 / 'RomFS.img').exists())
+                self.assertFalse((v131072 / 'RomFS.img.id').exists())
 
                 updated_launcher = json.loads((fw_dm / 'launcher.json').read_text(encoding='utf-8'))
                 lang_row = updated_launcher['settings'][0]
@@ -4030,7 +4053,7 @@ class WindowsBuildFixesTest(unittest.TestCase):
                 self.assertEqual(lang_row['note'], '')
 
                 # When the extracted image has no .id file on a subsequent archive, any stale romfs.img.id is removed
-                (v131072 / 'RomFS.img.id').unlink()
+                (v131072 / 'RomFS.img').write_bytes(img_new)
                 self.assertEqual(m.pack_archive(title_id=tid), (True, ''))
                 self.assertFalse((dest / 'romfs.img.id').exists())
 

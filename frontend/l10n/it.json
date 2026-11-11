@@ -1,12 +1,5 @@
 {
-  "_language": {
-    "locales": [
-      "it",
-      "italian",
-      "italiano"
-    ],
-    "name": "Italiano"
-  },
+  "_language": {"locales": ["it", "italian", "italiano"], "name": "Italiano"},
   "activity.ios": "Build per iPhone in corso",
   "activity.mac": "Build per Mac in corso",
   "activity.transfer": "Trasferimento dei file di gioco su iPhone",
@@ -113,7 +106,7 @@
   "buildfiles.remove": "Rimuovi",
   "buildfiles.removeNamed": "Rimuovi i file di build di %@",
   "buildfiles.removing": "Rimozione…",
-  "buildfiles.stays": "Log, salvataggi delle build di sviluppo e file di gioco convertiti restano.",
+  "buildfiles.stays": "Log e salvataggi delle build di sviluppo restano.",
   "buildfiles.title": "Rimuovi i file di build",
   "buildfiles.total": "Totale",
   "cheats.alwaysOn": "Sempre attivo",
@@ -866,6 +859,9 @@
   "fail.a32Program.next": "Scegli l’aggiornamento indicato nel profilo.",
   "fail.a32Program.what": "Questa versione è a 32 bit e non può funzionare sui chip Apple.",
   "fail.a32Program.whatNamed": "Questa versione di %@ è a 32 bit e non può funzionare sui chip Apple.",
+  "fail.appIDLimit.next": "Ricompilare ora non servirà e nuovi bundle ID consumerebbero solo più in fretta gli slot futuri. Attendi la scadenza di un vecchio App ID dopo 7 giorni oppure firma con un team Apple Developer a pagamento, che non ha questo limite. Compila per l’app condivisa così tutti i giochi useranno un solo App ID.",
+  "fail.appIDLimit.what": "Il tuo Apple ID gratuito ha usato tutti i 10 App ID consentiti in 7 giorni (errore Apple 9120).",
+  "fail.appIDLimit.whatUntil": "Il tuo Apple ID gratuito ha usato tutti i 10 App ID consentiti in 7 giorni (errore Apple 9120). Il più vecchio si libererà il %@.",
   "fail.buildAnyway": "Compila comunque…",
   "fail.cloudFolder.button": "Scegli un’altra cartella",
   "fail.cloudFolder.next": "Le cartelle cloud aggiungono dati nascosti a ogni file. Il passaggio di firma alla fine della build li rifiuta. Sposta i file di gioco fuori da iCloud Drive, o scegli una cartella esterna in Salva in. Poi compila di nuovo.",
@@ -982,7 +978,7 @@
   "free.failed": "Impossibile rimuovere alcuni file: %@",
   "free.freed": "Liberati %@.",
   "free.kept": "Conservati",
-  "free.keptNote": "Log, profilo del gioco, NSP convertiti e salvataggi",
+  "free.keptNote": "Log, profilo del gioco e salvataggi",
   "free.measuring": "Misurazione…",
   "free.menu": "Libera spazio…",
   "free.note": "Rimuove i file di build di questo gioco, che verranno ricreati alla prossima build. Conserva l’app, l’IPA, l’archivio dei dati di gioco e i file NSP.",
@@ -1485,6 +1481,8 @@
   "launch.set.DM_TOUCH_STICK": "Levetta sinistra",
   "launch.set.DM_TOUCH_STICK.note": "Dove si trova lo stick sinistro dei comandi sullo schermo.",
   "launch.set.DM_UPSCALER": "Upscaler del gioco",
+  "launch.set.MAC_GAME_MODE": "Modalità Gioco di macOS",
+  "launch.set.MAC_GAME_MODE.note": "Raddoppia il campionamento Bluetooth dei controller e riduce la latenza audio a schermo intero. Lascia disattivato se il frame rate cala dopo alcuni minuti sul tuo Mac (macOS può mantenere la GPU a bassa frequenza).",
   "launch.title": "Opzioni di avvio",
   "launch.useForNew": "Usa per i nuovi giochi",
   "launch.useForNewDone": "Salvato. I giochi che aggiungi da ora partono con queste impostazioni.",
