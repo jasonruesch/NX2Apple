@@ -1,12 +1,5 @@
 {
-  "_language": {
-    "locales": [
-      "es",
-      "spanish",
-      "español"
-    ],
-    "name": "Español"
-  },
+  "_language": {"locales": ["es", "spanish", "español"], "name": "Español"},
   "activity.ios": "Compilación de iPhone en curso",
   "activity.mac": "Compilación de Mac en curso",
   "activity.transfer": "Transfiriendo los archivos del juego al iPhone",
@@ -113,7 +106,7 @@
   "buildfiles.remove": "Eliminar",
   "buildfiles.removeNamed": "Eliminar los archivos de compilación de %@",
   "buildfiles.removing": "Eliminando…",
-  "buildfiles.stays": "Se conservan los registros, las partidas de las compilaciones de desarrollo y los archivos del juego convertidos.",
+  "buildfiles.stays": "Se conservan los registros y las partidas de las compilaciones de desarrollo.",
   "buildfiles.title": "Eliminar archivos de compilación",
   "buildfiles.total": "Total",
   "cheats.alwaysOn": "Siempre activado",
@@ -866,6 +859,9 @@
   "fail.a32Program.next": "Elige la actualización que indica el perfil.",
   "fail.a32Program.what": "Esta versión es de 32 bits y no puede ejecutarse en Apple silicon.",
   "fail.a32Program.whatNamed": "Esta versión de %@ es de 32 bits y no puede ejecutarse en Apple silicon.",
+  "fail.appIDLimit.next": "Volver a compilar ahora no ayudará y usar nuevos identificadores solo agotará antes los próximos espacios. Espera a que caduque un App ID antiguo tras 7 días o firma con un equipo de pago de Apple Developer, que no tiene este límite. Usa la app compartida para que todos los juegos compartan un solo App ID.",
+  "fail.appIDLimit.what": "Tu Apple ID gratuito ya usó los 10 App ID permitidos en 7 días (error 9120 de Apple).",
+  "fail.appIDLimit.whatUntil": "Tu Apple ID gratuito ya usó los 10 App ID permitidos en 7 días (error 9120 de Apple). El más antiguo quedará libre el %@.",
   "fail.buildAnyway": "Compilar igualmente…",
   "fail.cloudFolder.button": "Elegir otra carpeta",
   "fail.cloudFolder.next": "Las carpetas en la nube añaden datos ocultos a cada archivo. El paso de firma al final de la compilación lo rechaza. Saca los archivos del juego de iCloud Drive, o elige una carpeta fuera de ella en Guardar en. Luego compila de nuevo.",
@@ -982,7 +978,7 @@
   "free.failed": "No se pudieron quitar algunos archivos: %@",
   "free.freed": "Se liberaron %@.",
   "free.kept": "Se conserva",
-  "free.keptNote": "Registros, el perfil del juego, NSP convertidos y partidas guardadas",
+  "free.keptNote": "Registros, el perfil del juego y partidas guardadas",
   "free.measuring": "Midiendo…",
   "free.menu": "Liberar espacio…",
   "free.note": "Quita los archivos de compilación de este juego, que la próxima compilación vuelve a crear. La app, el IPA, el archivo de datos del juego y los NSP se quedan.",
@@ -1485,6 +1481,8 @@
   "launch.set.DM_TOUCH_STICK": "Palanca izquierda",
   "launch.set.DM_TOUCH_STICK.note": "Dónde está la palanca izquierda de los controles en pantalla.",
   "launch.set.DM_UPSCALER": "Escalador del juego",
+  "launch.set.MAC_GAME_MODE": "Modo Juego de macOS",
+  "launch.set.MAC_GAME_MODE.note": "Duplica el muestreo Bluetooth de los mandos y reduce la latencia de audio en pantalla completa. Déjalo desactivado si los fotogramas caen tras unos minutos en tu Mac (macOS puede mantener la GPU a baja frecuencia).",
   "launch.title": "Opciones de inicio",
   "launch.useForNew": "Para juegos nuevos",
   "launch.useForNewDone": "Guardado. Los juegos que añadas desde ahora empiezan con esto.",

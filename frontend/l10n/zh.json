@@ -1,12 +1,5 @@
 {
-  "_language": {
-    "locales": [
-      "zh",
-      "chinese"
-    ],
-    "name": "中文",
-    "order": 0
-  },
+  "_language": {"locales": ["zh", "chinese"], "name": "中文", "order": 0},
   "activity.ios": "正在构建 iPhone 版",
   "activity.mac": "正在构建 Mac 版",
   "activity.transfer": "正在传输游戏文件到 iPhone",
@@ -113,7 +106,7 @@
   "buildfiles.remove": "移除",
   "buildfiles.removeNamed": "移除 %@ 的构建文件",
   "buildfiles.removing": "正在移除…",
-  "buildfiles.stays": "日志、开发构建的存档和转换后的游戏文件会保留。",
+  "buildfiles.stays": "日志和开发构建的存档会保留。",
   "buildfiles.title": "移除构建文件",
   "buildfiles.total": "总计",
   "cheats.alwaysOn": "始终开启",
@@ -866,6 +859,9 @@
   "fail.a32Program.next": "请选择游戏配置里列出的那个更新版本。",
   "fail.a32Program.what": "这个版本是 32 位的，无法在 Apple 芯片上运行。",
   "fail.a32Program.whatNamed": "%@ 的这个版本是 32 位的，无法在 Apple 芯片上运行。",
+  "fail.appIDLimit.next": "现在重新构建无济于事，改换新包名只会更快耗尽后续名额。请等待旧 App ID 满 7 天自动过期，或改用无此上限的付费 Apple 开发者团队签名。日常安装请使用共享应用模式，让所有游戏共用同一个 App ID。",
+  "fail.appIDLimit.what": "当前免费 Apple ID 在 7 天内可注册的 10 个 App ID 已全部用完（Apple 错误 9120）。",
+  "fail.appIDLimit.whatUntil": "当前免费 Apple ID 在 7 天内可注册的 10 个 App ID 已全部用完（Apple 错误 9120），最早的一个将于 %@ 释放。",
   "fail.buildAnyway": "仍然构建…",
   "fail.cloudFolder.button": "选择其他文件夹",
   "fail.cloudFolder.next": "云端文件夹会给每个文件加上隐藏的附加数据，构建最后的签名步骤不接受这些数据。请把游戏文件移出 iCloud 云盘，或者在「保存到」里选一个云盘之外的文件夹。然后再构建。",
@@ -982,7 +978,7 @@
   "free.failed": "有些文件无法删除：%@",
   "free.freed": "已释放 %@。",
   "free.kept": "保留",
-  "free.keptNote": "日志、游戏配置、转换后的 NSP 和存档",
+  "free.keptNote": "日志、游戏配置和存档",
   "free.measuring": "正在计算大小…",
   "free.menu": "释放空间…",
   "free.note": "删除这个游戏的构建文件，下次构建时会重新生成。应用、IPA、游戏数据归档和 NSP 文件都会保留。",
@@ -1485,6 +1481,8 @@
   "launch.set.DM_TOUCH_STICK": "左摇杆",
   "launch.set.DM_TOUCH_STICK.note": "屏幕控件中左摇杆所在的位置。",
   "launch.set.DM_UPSCALER": "游戏自带超分",
+  "launch.set.MAC_GAME_MODE": "macOS 游戏模式",
+  "launch.set.MAC_GAME_MODE.note": "全屏游玩时提高蓝牙手柄采样率并降低音频延迟。如果在你的 Mac 上游玩几分钟后出现掉帧，请保持关闭（macOS 可能会将 GPU 锁定在低频）。",
   "launch.title": "启动选项",
   "launch.useForNew": "用于新游戏",
   "launch.useForNewDone": "已保存。今后添加的游戏将使用这些设置。",

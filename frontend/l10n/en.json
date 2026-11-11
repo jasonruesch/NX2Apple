@@ -1,11 +1,5 @@
 {
-  "_language": {
-    "locales": [
-      "en"
-    ],
-    "name": "English",
-    "order": 1
-  },
+  "_language": {"locales": ["en"], "name": "English", "order": 1},
   "activity.ios": "iPhone build in progress",
   "activity.mac": "Mac build in progress",
   "activity.transfer": "Transferring game files to the iPhone",
@@ -112,7 +106,7 @@
   "buildfiles.remove": "Remove",
   "buildfiles.removeNamed": "Remove the build files of %@",
   "buildfiles.removing": "Removing…",
-  "buildfiles.stays": "Logs, saves of development builds and converted game files stay.",
+  "buildfiles.stays": "Logs and saves of development builds stay.",
   "buildfiles.title": "Remove build files",
   "buildfiles.total": "Total",
   "cheats.alwaysOn": "Always on",
@@ -865,6 +859,9 @@
   "fail.a32Program.next": "Pick the update the profile lists.",
   "fail.a32Program.what": "This version is 32-bit and can't run on Apple silicon.",
   "fail.a32Program.whatNamed": "This version of %@ is 32-bit and can't run on Apple silicon.",
+  "fail.appIDLimit.next": "Rebuilding now will not help, and new bundle IDs only spend future slots faster. Wait for an older App ID to expire after 7 days or sign with a paid Apple Developer team, which has no 10-App-ID limit. Build for the shared app so all games share one App ID.",
+  "fail.appIDLimit.what": "Your free Apple ID has used all 10 App IDs allowed in 7 days (Apple error 9120).",
+  "fail.appIDLimit.whatUntil": "Your free Apple ID has used all 10 App IDs allowed in 7 days (Apple error 9120). The oldest one frees up on %@.",
   "fail.buildAnyway": "Build anyway…",
   "fail.cloudFolder.button": "Choose another folder",
   "fail.cloudFolder.next": "Cloud folders add hidden data to every file. The signing step at the end of the build refuses it. Move your game files out of iCloud Drive, or choose a folder outside it under Save to. Then build again.",
@@ -981,7 +978,7 @@
   "free.failed": "Some files could not be removed: %@",
   "free.freed": "Freed %@.",
   "free.kept": "Kept",
-  "free.keptNote": "Logs, the game’s profile, converted NSPs and saves",
+  "free.keptNote": "Logs, the game’s profile and saves",
   "free.measuring": "Measuring…",
   "free.menu": "Free space…",
   "free.note": "Removes this game’s build files, which the next build makes again. The app, the IPA, the game data archive and the NSPs stay.",
@@ -1484,6 +1481,8 @@
   "launch.set.DM_TOUCH_STICK": "Left stick",
   "launch.set.DM_TOUCH_STICK.note": "Where the left stick of the on-screen controls sits.",
   "launch.set.DM_UPSCALER": "Game's upscaler",
+  "launch.set.MAC_GAME_MODE": "macOS Game Mode",
+  "launch.set.MAC_GAME_MODE.note": "Doubles Bluetooth controller polling and lowers audio latency in fullscreen. Leave off if frame rate drops after a few minutes on your Mac (macOS may hold the GPU at a low clock).",
   "launch.title": "Launch options",
   "launch.useForNew": "Use for new games",
   "launch.useForNewDone": "Saved. Games you add from now on start with these.",
