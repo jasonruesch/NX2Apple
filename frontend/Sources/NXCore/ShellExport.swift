@@ -286,8 +286,11 @@ extension ShellInstaller {
             try fm.createDirectory(atPath: stage + "/Payload", withIntermediateDirectories: true)
             try fm.copyItem(at: app, to: stagedApp)
             let payload = stagedApp.deletingLastPathComponent()
+            if exportWithoutShaders {
+                packed = try ShellExport.stripShaders(in: stagedApp, frameworkNames: library.games.map { URL(fileURLWithPath: $0.framework).lastPathComponent })
+            }
             if try ShellExport.exceedsEntryLimit(in: payload, limit: entryLimit) {
-                packed = try packShaderLibraries(in: stagedApp, games: library.games, label: packName)
+                packed += try packShaderLibraries(in: stagedApp, games: library.games, label: packName)
                 if try ShellExport.exceedsEntryLimit(in: payload, limit: hardLimit) {
                     throw ShellExport.entryLimitExceededError(limit: hardLimit)
                 }
@@ -464,6 +467,15 @@ package enum ShellExport {
             append(item)
         }
         return names
+    }
+
+    /// Leaves the shaders of the named game frameworks out of the staged app (GameShaders.strip). Returns the frameworks it changed.
+    package static func stripShaders(in stagedApp: URL, frameworkNames: [String]) throws -> [URL] {
+        let frameworks = stagedApp.appendingPathComponent("Frameworks")
+        return try Set(frameworkNames).sorted().compactMap { name in
+            let framework = frameworks.appendingPathComponent(name)
+            return try GameShaders.strip(framework: framework) ? framework : nil
+        }
     }
 
     /// Packs loose `msl/` directories inside the named game frameworks into `msl-<UUID>.aar` archives so the IPA stays within ZIP32 limits.

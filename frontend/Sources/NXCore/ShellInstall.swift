@@ -316,6 +316,8 @@ package struct ShellInstaller {
     package var exportTeam = ""
     /// The export's bundle ID: empty keeps the one shell.json holds.
     package var exportBundleID = ""
+    /// The export leaves each game's shaders out of the IPA: they go to the device with the game data (GameShaders).
+    package var exportWithoutShaders = false
     /// The codesign the team-signed export runs (a test points it at a stand-in).
     package var codesign = "/usr/bin/codesign"
 
@@ -526,7 +528,13 @@ package struct ShellInstaller {
         _ = run(ShellInstall.listCommand(xcrun: xcrun, device: device, bundleID: bundleID, titleID: titleID, json: listing),
                 env: nil, label: checkName, step: { _ in nil })
         let onDevice = ShellInstall.parseListing(FileManager.default.contents(atPath: listing))
-        let local = ShellInstall.localFiles(in: archive)
+        // An IPA without shaders gets them with the game data: placed beside it first, then sent like any of its files
+        var framework: String?
+        if exportWithoutShaders, let fw = ShellLibrary.load(root: root).games.first(where: { $0.titleID == titleID })?.framework {
+            do { try GameShaders.place(framework: fw, in: archive); framework = fw }
+            catch { log("send: the shaders could not be placed beside the game data: \(error.localizedDescription)\n") }
+        }
+        let local = GameShaders.dataFiles(archive: archive, framework: framework)
         // The listing still catches missing and interrupted copies. Two releases can also have the same image size.
         let receipt = "shellCopiedRomFS/\(device)/\(bundleID)/\(titleID)"
         let previous = defaults.string(forKey: receipt)

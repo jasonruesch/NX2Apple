@@ -78,6 +78,9 @@ final class ShellExportCaptureTests: IsolatedDefaultsTestCase {
         try shot("0-install", card())
         stores.deviceStore.exportIPA = true
         try shot("1-ready", card())
+        stores.deviceStore.ipaWithoutShaders = true   // the shaders go with each game's data instead
+        try shot("1a-ready-without-shaders", card())
+        stores.deviceStore.ipaWithoutShaders = false
         model.exportedIPAPath = ipa.path
         model.archivePath = "/Users/me/Games/0100000000010000_build/games/0100000000010000"
         try shot("2-exported", card())
