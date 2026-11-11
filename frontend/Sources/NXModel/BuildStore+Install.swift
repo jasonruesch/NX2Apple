@@ -35,9 +35,10 @@ extension BuildStore {
         installer.processStarted = { @Sendable p in hop { self.proc = p } }
         // The size and the connection are shown with Continue, "Wait for a cable" and "Not now" (ShellCopyCard)
         let target = devices
-        installer.decideCopy = { plan in target.askCopy(plan) }
-        installer.waiting = { on in target.setWaiting(on) }
-        installer.waitCancelled = { target.waitCancelled }
+        let cancel = installCancel
+        installer.decideCopy = { plan in cancel.value ? .skip : target.askCopy(plan) }
+        installer.waiting = { on in if !cancel.value || !on { target.setWaiting(on) } }
+        installer.waitCancelled = { cancel.value || target.waitCancelled }
         return installer
     }
 
@@ -47,6 +48,8 @@ extension BuildStore {
         buildingGame = true
         runningTarget = BuildTarget.ios
         beginOperation(dataOnly ? .sendingGameData : .installing, game: name, titleID: titleID, destination: .target)
+        stopping = false; installCancel.set(false); installPhaseActive = true
+        if dataOnly { stoppedByPlayer = false }
         running = true
         finderShown = false
         if dataOnly { failure = nil; done = false; doneNote = "" }
@@ -58,6 +61,7 @@ extension BuildStore {
             let result = dataOnly ? installer.installData(titleID: titleID, archive: archive)
                                   : installer.install(framework: framework, titleID: titleID, name: name, archive: archive)
             hop {
+                self.installPhaseActive = false
                 target.copyEnded()
                 if self.stopping {
                     self.stopping = false; self.running = false
@@ -81,6 +85,23 @@ extension BuildStore {
     package func retryShellData() {
         guard !running, let r = shellRetry else { return }
         installShell(framework: r.framework, titleID: r.titleID, name: r.name, archive: r.archive, dataOnly: true)
+    }
+
+    /// Cancels an active drive copy or post-build device install wait when no child process is running.
+    func stopPendingInstallOrCopy() -> Bool {
+        if case .copying = send { stopDriveCopy(); return true }
+        guard endPreflight == nil else { return false }
+        devices.cancelCopy()
+        guard running, !stopping else { return false }
+        installCancel.set(true)
+        if proc?.isRunning == true { return false }
+        guard installPhaseActive else { return false }
+        stopping = true
+        stopPSOPoll()
+        DispatchQueue.main.async { [weak self] in
+            if self?.stopping == true { self?.devices.cancelCopy() }
+        }
+        return true
     }
 
     package func finishInstall(_ failure: String?, note: String? = nil) {
@@ -154,6 +175,7 @@ extension BuildStore {
         let resources = Bundle.main.resourceURL?.path, repoPath = repo.path, home = self.home, runner = self.runner
         buildingGame = false; runningTarget = BuildTarget.ios
         beginOperation(.renewingSignature, game: nil, titleID: nil, destination: .target)
+        stopping = false; stoppedByPlayer = false; installPhaseActive = true
         running = true
         // The shared app is signed again under the identifier shell.json holds, so the device keeps its Documents
         let command = ShellInstall.buildCommand(xcrun: xcrun, root: shell.root, device: device, team: team, bundleID: bundle)
@@ -164,9 +186,12 @@ extension BuildStore {
                     app: app, bundleID: bundle, team: team, home: home, runner: runner
                 )
                 hop {
+                    self.installPhaseActive = false
                     if self.stopping {
+                        self.stopping = false
                         stagedProfiles.rollback()
                         self.running = false
+                        self.doneNote = self.t("msg.stopped")
                         then?(); return
                     }
                     self.stagedResignProfiles = stagedProfiles
@@ -217,6 +242,7 @@ extension BuildStore {
         runTool(id: ShellInstaller.projectStageID, name: t("shell.projectStage"),
                 ShellInstall.projectCommand(repo: engineRoot), environment: env, step: { _ in nil }) { projectError in
             if let projectError, !projectError.isEmpty {
+                self.installPhaseActive = false
                 self.running = false
                 self.doneNote = String(format: self.t("shell.projectFailed"), projectError)
                 then?(); return
@@ -228,38 +254,131 @@ extension BuildStore {
 
     /// The signed app as an .ipa, written to the place the app's save panel (`chooseSaveLocation`) returned.
     package func saveIPAPanel() {
+        guard !running else { return }
         guard let url = chooseSaveLocation(t("dev.saveIPATitle"), defaultIPAName()) else { return }
         saveIPA(to: url)
     }
 
     /// The signed app as an .ipa (Payload/<name>.app, the layout iOS and the sideloaders install): useful while the
-    /// signature lasts, and the thing to re-sign when it expires. The game data is not in it — it stays in the app's
-    /// Documents (romfs.img), as a normal iOS build has it.
-    package func saveIPA(to url: URL, then: (() -> Void)? = nil) {
-        let app = installedAppPath, fm = FileManager.default
-        guard !app.isEmpty, fm.fileExists(atPath: app) else {
+    /// signature lasts, and the thing to re-sign when it expires. All staging copies, shader archive packing, ZIP32
+    /// entry-count validation and archive creation run on a background queue so multi-GB bundles never freeze the UI.
+    package func saveIPA(to url: URL, entryLimit: Int = ShellExport.entryLimit, then: (() -> Void)? = nil) {
+        guard !running else { return }
+        let app = installedAppPath
+        guard !app.isEmpty, FileManager.default.fileExists(atPath: app) else {
             doneNote = String(format: t("dev.saveNeedsApp"), shortPath(app))
-            then?(); return
-        }
-        let stage = fm.temporaryDirectory.appendingPathComponent("nspb-ipa-" + UUID().uuidString)
-        let payload = stage.appendingPathComponent("Payload")
-        do {
-            try fm.createDirectory(at: payload, withIntermediateDirectories: true)
-            try fm.copyItem(atPath: app, toPath: payload.appendingPathComponent((app as NSString).lastPathComponent).path)
-        } catch {
-            try? fm.removeItem(at: stage)
-            doneNote = String(format: t("dev.saveFailed"), error.localizedDescription)
-            then?(); return
-        }
-        buildingGame = false; runningTarget = BuildTarget.ios
-        beginOperation(.exportingIPA, game: nil, titleID: nil, destination: .none)
-        running = true
-        runTool(id: 1005, name: t("dev.saveStage"), BuildCommands.ipaCommand(payload: payload.path, ipa: url.path), step: { _ in nil }) { error in
-            try? fm.removeItem(at: stage)
-            self.running = false
-            self.doneNote = error.map { String(format: self.t("dev.saveFailed"), $0) }
-                ?? String(format: self.t("dev.savedIPA"), self.shortPath(url.path))
             then?()
+            return
+        }
+        let stageID = 1005
+        let stageName = t("dev.saveStage")
+        let groupPython = deps.pythonPath.isEmpty ? "/usr/bin/python3" : deps.pythonPath
+        let lang = localizer.lang
+        let runner = self.runner
+        let cancel = installCancel
+        buildingGame = false
+        runningTarget = BuildTarget.ios
+        beginOperation(.exportingIPA, game: nil, titleID: nil, destination: .none)
+        stopping = false
+        stoppedByPlayer = false
+        cancel.set(false)
+        installPhaseActive = true
+        running = true
+        if let i = stages.firstIndex(where: { $0.id == stageID }) {
+            stages[i] = Stage(id: stageID, name: stageName, state: .running, started: Date())
+        } else {
+            stages.append(Stage(id: stageID, name: stageName, state: .running, started: Date()))
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let fm = FileManager.default
+            let stage = fm.temporaryDirectory.appendingPathComponent("nspb-ipa-" + UUID().uuidString)
+            let payload = stage.appendingPathComponent("Payload")
+            let stagedApp = payload.appendingPathComponent((app as NSString).lastPathComponent)
+            let toolEnv = [
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                "HOME": NSHomeDirectory(),
+                "USER": NSUserName(),
+                "LANG": "en_US.UTF-8"
+            ]
+            let runStep: ([String]) -> (status: Int32, output: String, lastError: String?) = { command in
+                hop { self?.append("[\(stageName)] \(command.joined(separator: " "))\n") }
+                var output = ""
+                var lastError: String?
+                let launch = ProcessLaunch(command, environment: toolEnv, groupPython: groupPython)
+                let res = runner.streamLines(launch, started: { p in hop { self?.proc = p } }) { line in
+                    hop { self?.append(line + "\n") }
+                    output += line + "\n"
+                    if line.contains("error:") || line.hasPrefix("ERROR:") {
+                        lastError = line.trimmingCharacters(in: .whitespaces)
+                    }
+                }
+                guard res.started else { return (127, res.out, res.out) }
+                return (res.status, output, lastError)
+            }
+
+            var failureReason: String?
+            var ranZip = false
+            do {
+                try fm.createDirectory(at: payload, withIntermediateDirectories: true)
+                try fm.copyItem(atPath: app, toPath: stagedApp.path)
+                if !cancel.value, try ShellExport.exceedsEntryLimit(in: payload, limit: entryLimit) {
+                    let frameworks = ShellExport.gameFrameworkNames(forApp: app, stagedApp: stagedApp, fm: fm)
+                    try ShellExport.packShaderLibraries(
+                        in: stagedApp,
+                        frameworkNames: frameworks,
+                        runArchive: runStep,
+                        exitCodeMessage: { String(format: L10n.string("msg.exitCode", lang), $0) }
+                    )
+                    if try ShellExport.exceedsEntryLimit(in: payload, limit: entryLimit) {
+                        throw ShellExport.entryLimitExceededError(limit: entryLimit)
+                    }
+                }
+                if !cancel.value {
+                    try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    ranZip = true
+                    let zipped = runStep(BuildCommands.ipaCommand(payload: payload.path, ipa: url.path))
+                    if zipped.status != 0 {
+                        try? fm.removeItem(at: url)
+                        failureReason = zipped.lastError ?? String(format: L10n.string("msg.exitCode", lang), zipped.status)
+                    }
+                }
+            } catch {
+                failureReason = error.localizedDescription
+            }
+            if cancel.value, ranZip {
+                try? fm.removeItem(at: url)
+            }
+            try? fm.removeItem(at: stage)
+
+            hop {
+                guard let self else { return }
+                self.proc = nil
+                self.installPhaseActive = false
+                if self.stopping || cancel.value {
+                    self.stopping = false
+                    self.running = false
+                    self.resetProgress()
+                    self.doneNote = self.t("msg.stopped")
+                    self.cleanupStaging()
+                    then?()
+                    return
+                }
+                let ok = failureReason == nil
+                if let i = self.stages.firstIndex(where: { $0.id == stageID }) {
+                    self.stages[i].state = ok ? .done : .failed
+                    if ok {
+                        self.stages[i].percent = 100
+                        self.stages[i].detail = ""
+                    } else if let failureReason {
+                        self.stages[i].detail = failureReason
+                    }
+                }
+                self.running = false
+                self.doneNote = failureReason.map { String(format: self.t("dev.saveFailed"), $0) }
+                    ?? String(format: self.t("dev.savedIPA"), self.shortPath(url.path))
+                then?()
+            }
         }
     }
 
@@ -288,27 +407,46 @@ extension BuildStore {
         let env = environment ?? ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": NSHomeDirectory(), "USER": NSUserName(), "LANG": "en_US.UTF-8"]
         let launch = ProcessLaunch(command, environment: env,
                                    groupPython: deps.pythonPath.isEmpty ? "/usr/bin/python3" : deps.pythonPath)
+        let utf8 = UTF8StreamDecoder.Locked()
         var buffer = "", lastError = ""
+        let handleLine: @MainActor (BuildStore, String) -> Void = { store, raw in
+            var line = raw
+            if line.unicodeScalars.last == "\r" { line.unicodeScalars.removeLast() }
+            store.append(line + "\n")
+            if line.contains("error:") || line.hasPrefix("ERROR:") { lastError = line.trimmingCharacters(in: .whitespaces) }
+            if let s = step(line), let i = store.stages.firstIndex(where: { $0.id == id }) {
+                store.stages[i].detail = s.detail
+                if let percent = s.percent { store.stages[i].percent = percent }
+            }
+        }
         let onOutput: @Sendable (Data) -> Void = { [weak self] d in
-            guard let chunk = String(data: d, encoding: .utf8) else { return }
             hop {
                 guard let self else { return }
+                let chunk = utf8.decode(d)
+                guard !chunk.isEmpty else { return }
                 buffer += chunk
-                while let nl = buffer.firstIndex(of: "\n") {
-                    let line = String(buffer[..<nl]); buffer = String(buffer[buffer.index(after: nl)...])
-                    self.append(line + "\n")
-                    if line.contains("error:") || line.hasPrefix("ERROR:") { lastError = line.trimmingCharacters(in: .whitespaces) }
-                    if let s = step(line), let i = self.stages.firstIndex(where: { $0.id == id }) {
-                        self.stages[i].detail = s.detail
-                        if let percent = s.percent { self.stages[i].percent = percent }
-                    }
+                while let nl = buffer.unicodeScalars.firstIndex(of: "\n") {
+                    let line = String(buffer.unicodeScalars[..<nl])
+                    buffer = String(buffer.unicodeScalars[buffer.unicodeScalars.index(after: nl)...])
+                    handleLine(self, line)
                 }
             }
         }
         let onExit: @Sendable (Int32) -> Void = { [weak self] status in
             hop {
                 guard let self else { return }
+                buffer += utf8.finish()
+                while let nl = buffer.unicodeScalars.firstIndex(of: "\n") {
+                    let line = String(buffer.unicodeScalars[..<nl])
+                    buffer = String(buffer.unicodeScalars[buffer.unicodeScalars.index(after: nl)...])
+                    handleLine(self, line)
+                }
+                if !buffer.isEmpty {
+                    let tail = buffer; buffer = ""
+                    handleLine(self, tail)
+                }
                 if self.stopping {
+                    self.installPhaseActive = false
                     self.stopping = false; self.running = false
                     self.resetProgress(); self.doneNote = self.t("msg.stopped"); self.cleanupStaging()
                     return
@@ -321,7 +459,7 @@ extension BuildStore {
                 then(ok ? nil : (lastError.isEmpty ? String(format: self.t("msg.exitCode"), status) : lastError))
             }
         }
-        do { proc = try runner.start(launch, onOutput: onOutput, onExit: onExit) } catch { then(error.localizedDescription) }
+        do { proc = try runner.start(launch, onOutput: onOutput, onExit: onExit) } catch { installPhaseActive = false; then(error.localizedDescription) }
     }
 
     /// Start the game on the device it was installed on.
