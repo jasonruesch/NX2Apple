@@ -28,6 +28,21 @@ PIN = 'ee6648cb2bb46c19255c1d04f88e9c40d36ef6b4'
 EID = PIN + '-d4abe1fa2485'
 
 
+# GitHub Actions sets GITHUB_REPOSITORY, the default of `--repo`: in a fork's CI it names the fork, and the manifest's sources would point
+# there instead of the release repository these tests expect. Every test here runs without it, as it does on a contributor's Mac.
+_github_repository = None
+
+
+def setUpModule():
+    global _github_repository
+    _github_repository = os.environ.pop('GITHUB_REPOSITORY', None)
+
+
+def tearDownModule():
+    if _github_repository is not None:
+        os.environ['GITHUB_REPOSITORY'] = _github_repository
+
+
 def new_key():
     k = ed25519.Ed25519PrivateKey.generate()
     raw = k.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
