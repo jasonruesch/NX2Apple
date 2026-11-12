@@ -3,7 +3,7 @@ import NXCore
 import NXModel
 
 /// The build queue (LNPANDY/NX2Apple#943): follows the current job's progress and result, above the log. Observes the queue store.
-/// Rows: name and status, the input summary, then Move up / Move down / Remove. No drag gestures.
+/// Rows: name and status, the input summary, then Move up / Move down / Remove for a waiting game, Remove for a finished one. No drag gestures.
 package struct BuildQueueCard: View {
     @ObservedObject var queue: BuildQueueStore
     let onSelectGames: () -> Void
@@ -77,6 +77,10 @@ package struct BuildQueueCard: View {
                         .accessibilityLabel(String(format: loc.t("queue.removeNamed"), entry.name))
                 }
                 .buttonStyle(LauncherSecondaryButtonStyle())
+            } else if entry.finished {   // a result the player is done with: built, failed or stopped
+                Button(loc.t("queue.remove")) { queue.remove(entry.id) }
+                    .accessibilityLabel(String(format: loc.t("queue.removeNamed"), entry.name))
+                    .buttonStyle(LauncherSecondaryButtonStyle())
             }
         }
         .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
