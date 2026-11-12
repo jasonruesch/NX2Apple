@@ -72,6 +72,19 @@ import NXCore
         XCTAssertEqual(q.entries.map(\.titleID), ["A", "C"])
     }
 
+    func testAFinishedResultCanBeRemovedAndStaysGone() {
+        let q = store()
+        q.enqueue([entry("A"), entry("B")])
+        busy = false; q.buildEnded(succeeded: false)   // A failed, B runs
+        busy = false; q.buildEnded(succeeded: true)    // B done
+        XCTAssertEqual(q.entries.map(\.status), [.failed, .done])
+        q.remove(q.entries[0].id)
+        XCTAssertEqual(q.entries.map(\.titleID), ["B"])
+        q.remove(q.entries[0].id)
+        XCTAssertTrue(q.isEmpty)
+        XCTAssertTrue(store().isEmpty, "the removal is saved")
+    }
+
     func testCancelQueuedKeepsTheRunningEntryAndTheResults() {
         let q = store()
         q.enqueue([entry("A"), entry("B"), entry("C")])
