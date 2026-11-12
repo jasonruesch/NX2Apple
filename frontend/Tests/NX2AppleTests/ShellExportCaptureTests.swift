@@ -101,10 +101,14 @@ final class ShellExportCaptureTests: IsolatedDefaultsTestCase {
         model.send = .idle
         stores.deviceStore.sendWhere = SendWhere.drive
         stores.deviceStore.driveFolder = "/Volumes/GameDrive/Switch"
+        model.sharedAppDataSources = { [TransferSource(titleID: "0100000000010000", name: "Super Mario Odyssey", archive: "/Users/me/Games/0100000000010000")] }
         model.drive = DriveState(volume: DriveCopy.Volume(freeBytes: 412_000_000_000, fileSystem: "exfat", readOnly: false), needed: 12_400_000_000, problem: nil)
         try shot("7-drive", card())
         model.send = .copying(done: 5_300_000_000, total: 12_400_000_000)
         try shot("8-drive-copying", card())
+        model.driveCopyName = "Metroid Dread"   // Copy all game data, on its second game
+        try shot("8a-drive-copying-all", card())
+        model.driveCopyName = ""
         model.send = .copied(folder: "/Volumes/GameDrive/Switch/0100000000010000")
         try shot("9-drive-done", card())
         model.send = .idle
