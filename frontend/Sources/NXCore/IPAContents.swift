@@ -15,6 +15,8 @@ package struct IPAContents: Equatable {
         case rebuiltByBuild
         /// In shell.json, but its framework is gone, so the export leaves it out.
         case missing
+        /// Built and in shell.json, but the player excluded it from the export (SharedAppGames).
+        case excluded
     }
 
     package struct Game: Equatable, Identifiable {
@@ -41,7 +43,7 @@ package struct IPAContents: Equatable {
 
     /// The shared app at `root`, against its last IPA. `building` is the build form's game, which "Build and export" builds first.
     package static func read(root: String, building: (titleID: String, name: String)? = nil, fm: FileManager = .default) -> IPAContents {
-        let library = ShellLibrary.load(root: root)
+        let library = ShellLibrary.load(root: root), excluded = SharedAppGames.excluded(root: root, fm: fm)
         let ipa = modified(ShellInstall.ipaPath(root: root), fm)
         func shown(_ name: String, _ titleID: String) -> String { let n = DriveCopy.displayName(name); return n.isEmpty ? titleID : n }
         var games: [Game] = library.games.map { game in
@@ -50,7 +52,8 @@ package struct IPAContents: Equatable {
             let built = modified(game.framework, fm)
             let inIPA = ipa.map { ipaDate in built.map { $0 <= ipaDate } ?? false } ?? false
             var tag: Tag = inIPA ? .inLastIPA : .newSinceIPA
-            if game.titleID.uppercased() == building?.titleID.uppercased() { tag = .rebuiltByBuild }
+            if excluded.contains(game.titleID.uppercased()) { tag = .excluded }
+            if game.titleID.uppercased() == building?.titleID.uppercased() { tag = .rebuiltByBuild }   // building it includes it again
             return Game(titleID: game.titleID, name: name, built: built, tag: tag)
         }
         if let building, !games.contains(where: { $0.titleID.uppercased() == building.titleID.uppercased() }) {
