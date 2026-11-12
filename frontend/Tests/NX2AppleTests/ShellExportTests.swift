@@ -200,6 +200,34 @@ import NXModel
         XCTAssertEqual(ShellLibrary.load(root: f.root).games.map(\.titleID), [titleID])
     }
 
+    func testAnExcludedGameStaysInShellJSONButNotInTheExportedApp() throws {
+        let f = try makeFixture()
+        let other = "0100000000000002", otherFramework = path("work2/shell-framework/DmGame\(other).framework")
+        try write(otherFramework + "/game.manifest.json", "{}")
+        try write(otherFramework + "/DmGame\(other)", "executable")
+        try ShellLibrary(games: [ShellLibrary.Game(titleID: other, name: "Other", framework: otherFramework)]).save(root: f.root)
+        try SharedAppGames.setExcluded(other, true, root: f.root)
+        // Xcode's earlier build still embeds the excluded game
+        try write(ShellInstall.exportAppPath(root: f.root) + "/Frameworks/DmGame\(other).framework/DmGame\(other)", "executable")
+        let outcome = installer(f).export(framework: f.framework, titleID: titleID, name: "Test Game")
+        XCTAssertTrue(outcome.ok, outcome.message)
+        let env = try String(contentsOfFile: state + "/shell-env.txt", encoding: .utf8)
+        let frameworks = env.components(separatedBy: "\n").first { $0.hasPrefix("DM_SHELL_FRAMEWORKS=") } ?? ""
+        XCTAssertFalse(frameworks.contains("DmGame\(other)"), env)
+        XCTAssertFalse(try entries(ofZip: outcome.ipaPath).contains { $0.contains("DmGame\(other).framework") })
+        XCTAssertEqual(Set(ShellLibrary.load(root: f.root).games.map(\.titleID)), [titleID, other], "shell.json keeps it")
+        XCTAssertTrue(SharedAppGames.isExcluded(other, root: f.root))
+    }
+
+    func testExportingAnExcludedGameIncludesItAgain() throws {
+        let f = try makeFixture()
+        try SharedAppGames.setExcluded(titleID, true, root: f.root)
+        let outcome = installer(f).export(framework: f.framework, titleID: titleID, name: "Test Game")
+        XCTAssertTrue(outcome.ok, outcome.message)
+        XCTAssertTrue(try entries(ofZip: outcome.ipaPath).contains("Payload/DmShell.app/Frameworks/DmGame\(titleID).framework/DmGame\(titleID)"))
+        XCTAssertFalse(SharedAppGames.isExcluded(titleID, root: f.root))
+    }
+
     func testExportKeepsTheTeamAnEarlierInstallStored() throws {
         let f = try makeFixture()
         var library = ShellLibrary()

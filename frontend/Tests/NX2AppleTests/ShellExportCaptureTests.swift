@@ -78,6 +78,9 @@ final class ShellExportCaptureTests: IsolatedDefaultsTestCase {
         try shot("0-install", card())
         stores.deviceStore.exportIPA = true
         try shot("1-ready", card())
+        try SharedAppGames.setExcluded("01006F8002326000", true, root: shellFolder.path)   // one game left out of the next IPA
+        try shot("1b-ready-excluded", card())
+        try SharedAppGames.setExcluded("01006F8002326000", false, root: shellFolder.path)
         stores.deviceStore.ipaWithoutShaders = true   // the shaders go with each game's data instead
         try shot("1a-ready-without-shaders", card())
         stores.deviceStore.ipaWithoutShaders = false

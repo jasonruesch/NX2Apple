@@ -4,11 +4,17 @@ import NXModel
 
 /// The games the shared app's IPA holds, under step 1 of the export: each with when it was built and where it stands against the
 /// last IPA, so the player sees what "Export IPA" and "Build and export" pack before choosing one. Read from shell.json and the
-/// frameworks on disk (`IPAContents`), as the export reads them.
+/// frameworks on disk (`IPAContents`), as the export reads them. It is also where the player manages the shared app's games: a switch
+/// per game leaves it out of the next IPA (or puts it back), and Remove takes it out of the shared app for good (SharedAppGames).
 struct IPAGamesList: View {
     let contents: IPAContents
+    /// Excluding, including and removing are refused while a build or an export runs.
+    var canChange = false
+    var setIncluded: (String, Bool) -> Void = { _, _ in }
+    var remove: (String) -> Void = { _ in }
     @EnvironmentObject var loc: Localizer
     @State private var expanded = false
+    @State private var removing: IPAContents.Game?
 
     /// A short list stays open; a long one opens on the player's click, its summary says what it holds.
     static let openUpTo = 6
@@ -39,12 +45,19 @@ struct IPAGamesList: View {
                 .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(LauncherPalette.ink(0.08)))
             }
         }
+        .confirmationDialog(String(format: loc.t("shell.ipaGameRemoveTitle"), removing?.name ?? ""),
+                            isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { game in
+            Button(loc.t("shell.ipaGameRemoveConfirm"), role: .destructive) { remove(game.titleID) }
+            Button(loc.t("shell.ipaGameRemoveKeep"), role: .cancel) {}
+        } message: { _ in
+            Text(loc.t("shell.ipaGameRemoveNote"))
+        }
     }
 
     private func row(_ game: IPAContents.Game) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: ExportGrid.gap) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(game.name).font(.manrope(13)).foregroundStyle(game.tag == .missing ? .secondary : .primary).lineLimit(1)
+                Text(game.name).font(.manrope(13)).foregroundStyle(game.tag == .missing || game.tag == .excluded ? .secondary : .primary).lineLimit(1)
                 if let built = game.built {
                     Text(String(format: loc.t("shell.ipaGameBuilt"), built.formatted(.dateTime.month(.abbreviated).day().hour().minute().locale(locale))))
                         .font(.manrope(11.5)).foregroundStyle(.tertiary)
@@ -52,9 +65,37 @@ struct IPAGamesList: View {
             }
             Spacer(minLength: ExportGrid.gap)
             tag(game.tag)
+            if game.tag != .addedByBuild {   // a game the build form would add is not in the shared app yet
+                controls(game)
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// The game's switch (in the next IPA or not) and its menu with Remove. A game whose framework is gone has nothing to include.
+    private func controls(_ game: IPAContents.Game) -> some View {
+        HStack(spacing: ExportGrid.tight) {
+            if game.tag != .missing {
+                Toggle(String(format: loc.t("shell.ipaGameInclude"), game.name),
+                       isOn: Binding(get: { game.tag != .excluded }, set: { setIncluded(game.titleID, $0) }))
+                    .toggleStyle(LauncherSwitchStyle()).labelsHidden()
+                    .disabled(!canChange || game.tag == .rebuiltByBuild)
+                    .help(loc.t(game.tag == .excluded ? "shell.ipaGameExcludedNote" : "shell.ipaGameIncludedNote"))
+            } else {   // the switch's room, so every row's menu lines up
+                Toggle("", isOn: .constant(false)).toggleStyle(LauncherSwitchStyle()).labelsHidden().hidden().accessibilityHidden(true)
+            }
+            Menu {
+                Button(loc.t("shell.ipaGameRemove")) { removing = game }
+            } label: {
+                Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+                    .frame(width: 24, height: 22).contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .disabled(!canChange)
+            .accessibilityLabel(String(format: loc.t("shell.ipaGameMore"), game.name))
+        }
+        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
     }
 
     private func tag(_ tag: IPAContents.Tag) -> some View {
@@ -65,6 +106,7 @@ struct IPAGamesList: View {
             case .addedByBuild: return ("shell.ipaTagAdded", LauncherPalette.building)
             case .rebuiltByBuild: return ("shell.ipaTagRebuilt", LauncherPalette.building)
             case .missing: return ("shell.ipaTagMissing", .red)
+            case .excluded: return ("shell.ipaTagExcluded", .secondary)
             }
         }()
         return Text(loc.t(key)).font(.manrope(11.5, .semibold)).foregroundStyle(color).lineLimit(1).fixedSize()
@@ -74,7 +116,8 @@ struct IPAGamesList: View {
     private var summary: String {
         let count = { (tags: [IPAContents.Tag]) in contents.games.filter { tags.contains($0.tag) }.count }
         let parts: [(String, Int)] = [("shell.ipaSummaryInLast", count([.inLastIPA])), ("shell.ipaSummaryNew", count([.newSinceIPA, .rebuiltByBuild])),
-                                      ("shell.ipaSummaryAdded", count([.addedByBuild])), ("shell.ipaSummaryMissing", count([.missing]))]
+                                      ("shell.ipaSummaryAdded", count([.addedByBuild])), ("shell.ipaSummaryMissing", count([.missing])),
+                                      ("shell.ipaSummaryExcluded", count([.excluded]))]
         return parts.filter { $0.1 > 0 }.map { String(format: loc.t($0.0), $0.1) }.joined(separator: " · ")
     }
 

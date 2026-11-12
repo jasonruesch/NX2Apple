@@ -85,4 +85,18 @@ final class IPAContentsTests: IsolatedDefaultsTestCase {
         XCTAssertEqual(IPAContents.read(root: root).games, [])
         XCTAssertEqual(IPAContents.read(root: root, building: (titleID: "0100000000000A00", name: "Alpha")).buildCount, 1)
     }
+
+    func testAnExcludedGameIsTaggedAndNotCountedUntilTheBuildFormBuildsIt() throws {
+        var library = ShellLibrary()
+        try game("0100000000000A00", "Alpha", built: day, in: &library)
+        try game("0100000000000B00", "Beta", built: day, in: &library)
+        try library.save(root: root)
+        try SharedAppGames.setExcluded("0100000000000b00", true, root: root)   // any letter case
+        let contents = IPAContents.read(root: root)
+        XCTAssertEqual(contents.games.map(\.tag), [.newSinceIPA, .excluded])
+        XCTAssertEqual(contents.exportCount, 1)
+        let building = IPAContents.read(root: root, building: (titleID: "0100000000000B00", name: "Beta"))
+        XCTAssertEqual(building.games.last?.tag, .rebuiltByBuild, "Build and export includes the game it builds")
+        XCTAssertEqual(building.exportCount, 2)
+    }
 }

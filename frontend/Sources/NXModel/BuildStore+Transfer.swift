@@ -33,11 +33,11 @@ extension BuildStore {
     }
 
     /// The IPA of the frameworks that are built can be made again: an IPA target, a usable bundle ID, a built game, and nothing running.
-    package var canExportBuiltGames: Bool { !running && exportsShell && !exportsOneGame && devices.ipaBundleIDValid && !builtShellGames().isEmpty }
+    package var canExportBuiltGames: Bool { !running && exportsShell && !exportsOneGame && devices.ipaBundleIDValid && !exportableShellGames().isEmpty }
 
     /// "Export IPA": the shell's project with every built framework, unsigned, zipped. No game is built or packed again.
     package func exportBuiltGames() {
-        guard canExportBuiltGames, let last = builtShellGames().last else { return }
+        guard canExportBuiltGames, let last = exportableShellGames().last else { return }
         exportShell(framework: last.framework, titleID: last.titleID, name: last.name)
     }
 

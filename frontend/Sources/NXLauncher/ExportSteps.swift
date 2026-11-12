@@ -57,7 +57,8 @@ package struct ExportSteps: View {
                 }
             }
             if let contents {   // the shared app's games, so the player sees what both buttons pack
-                IPAGamesList(contents: contents)
+                IPAGamesList(contents: contents, canChange: build.canManageShellGames,
+                             setIncluded: { build.setExcludedFromIPA($0, !$1) }, remove: { build.removeFromSharedApp($0) })
                     .padding(.leading, ExportGrid.axis).padding(.trailing, ExportGrid.inset).padding(.bottom, ExportGrid.inset)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
