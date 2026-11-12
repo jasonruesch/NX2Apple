@@ -55,16 +55,20 @@ struct IPAGamesList: View {
     }
 
     private func row(_ game: IPAContents.Game) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: ExportGrid.gap) {
+        HStack(alignment: .center, spacing: ExportGrid.gap) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(game.name).font(.manrope(13)).foregroundStyle(game.tag == .missing || game.tag == .excluded ? .secondary : .primary).lineLimit(1)
-                if let built = game.built {
-                    Text(String(format: loc.t("shell.ipaGameBuilt"), built.formatted(.dateTime.month(.abbreviated).day().hour().minute().locale(locale))))
-                        .font(.manrope(11.5)).foregroundStyle(.tertiary)
+                // Where it stands, after when it was built: the right side is the switch's own
+                HStack(spacing: 0) {
+                    if let built = game.built {
+                        Text(String(format: loc.t("shell.ipaGameBuilt"), built.formatted(.dateTime.month(.abbreviated).day().hour().minute().locale(locale))) + " · ")
+                            .foregroundStyle(.tertiary)
+                    }
+                    tag(game.tag)
                 }
+                .font(.manrope(11.5)).lineLimit(1)
             }
             Spacer(minLength: ExportGrid.gap)
-            tag(game.tag)
             if game.tag != .addedByBuild {   // a game the build form would add is not in the shared app yet
                 controls(game)
             }
@@ -76,6 +80,9 @@ struct IPAGamesList: View {
     /// The game's switch (in the next IPA or not) and its menu with Remove. A game whose framework is gone has nothing to include.
     private func controls(_ game: IPAContents.Game) -> some View {
         HStack(spacing: ExportGrid.tight) {
+            // What the switch does, beside it; a game with nothing to include keeps the room, so the rows line up
+            Text(loc.t("shell.ipaGameIncludeLabel")).font(.manrope(12, .semibold)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                .opacity(game.tag == .missing ? 0 : 1).accessibilityHidden(true)
             if game.tag != .missing {
                 Toggle(String(format: loc.t("shell.ipaGameInclude"), game.name),
                        isOn: Binding(get: { game.tag != .excluded }, set: { setIncluded(game.titleID, $0) }))
@@ -95,7 +102,6 @@ struct IPAGamesList: View {
             .disabled(!canChange)
             .accessibilityLabel(String(format: loc.t("shell.ipaGameMore"), game.name))
         }
-        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
     }
 
     private func tag(_ tag: IPAContents.Tag) -> some View {
@@ -109,7 +115,7 @@ struct IPAGamesList: View {
             case .excluded: return ("shell.ipaTagExcluded", .secondary)
             }
         }()
-        return Text(loc.t(key)).font(.manrope(11.5, .semibold)).foregroundStyle(color).lineLimit(1).fixedSize()
+        return Text(loc.t(key)).fontWeight(.semibold).foregroundStyle(color).lineLimit(1).fixedSize()
     }
 
     /// "18 in the last IPA · 2 new · 1 left out", the groups that are not empty.

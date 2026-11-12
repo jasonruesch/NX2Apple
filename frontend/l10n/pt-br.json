@@ -2052,6 +2052,7 @@
   "shell.ipaGameChangeFailed": "Não foi possível alterar os jogos do app compartilhado: %@",
   "shell.ipaGameExcludedNote": "Fora do próximo IPA. Ele continua compilado e continua na instalação em um dispositivo.",
   "shell.ipaGameInclude": "Incluir %@ no IPA",
+  "shell.ipaGameIncludeLabel": "Incluir no IPA",
   "shell.ipaGameIncludedNote": "No próximo IPA. Desligue para deixá-lo de fora: ele continua compilado e continua na instalação em um dispositivo.",
   "shell.ipaGameMore": "Mais para %@",
   "shell.ipaGameRemove": "Remover do app compartilhado…",

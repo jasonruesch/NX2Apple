@@ -2052,6 +2052,7 @@
   "shell.ipaGameChangeFailed": "Den delade appens spel kunde inte ändras: %@",
   "shell.ipaGameExcludedNote": "Utesluten ur nästa IPA. Det förblir byggt och finns kvar i installationen på en enhet.",
   "shell.ipaGameInclude": "Ta med %@ i IPA:n",
+  "shell.ipaGameIncludeLabel": "Ta med i IPA",
   "shell.ipaGameIncludedNote": "I nästa IPA. Stäng av för att utesluta det: det förblir byggt och finns kvar i installationen på en enhet.",
   "shell.ipaGameMore": "Mer för %@",
   "shell.ipaGameRemove": "Ta bort från den delade appen…",
