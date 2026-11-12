@@ -2052,6 +2052,7 @@
   "shell.ipaGameChangeFailed": "无法更改共享 App 的游戏：%@",
   "shell.ipaGameExcludedNote": "已从下一个 IPA 排除。它仍保持已构建，也仍在设备上的安装中。",
   "shell.ipaGameInclude": "将 %@ 包含在 IPA 中",
+  "shell.ipaGameIncludeLabel": "包含在 IPA 中",
   "shell.ipaGameIncludedNote": "在下一个 IPA 中。关闭即可排除：它仍保持已构建，也仍在设备上的安装中。",
   "shell.ipaGameMore": "%@ 的更多操作",
   "shell.ipaGameRemove": "从共享 App 移除…",
