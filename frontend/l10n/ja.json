@@ -2026,6 +2026,8 @@
   "shell.destinationUnavailableNext": "Xcode は選択した iPhone または iPad を使用できません。接続してロックを解除し、Xcode の「Devices and Simulators」を確認してから、「インストール先」でもう一度選択してください。",
   "shell.driveChoose": "フォルダを選択",
   "shell.driveCopy": "ゲームデータをコピー",
+  "shell.driveCopyAll": "全データをコピー",
+  "shell.driveCopyAllNote": "パッケージ済みのデータがあるすべてのゲームを、それぞれ専用のフォルダにコピーします。同じサイズで既にあるファイルはスキップします。",
   "shell.driveDone": "ゲームデータは %@ にあります。ドライブを iPhone に接続し、アプリの %@ でこのフォルダを選んでください。プレイ中はドライブを接続したままにする必要があります。",
   "shell.driveFailed": "コピーが止まりました：%@",
   "shell.driveFat32": "このドライブは FAT32 のため、4 GB を超えるファイルを保存できません。exFAT か APFS でフォーマットするか、別のドライブを選んでください。",

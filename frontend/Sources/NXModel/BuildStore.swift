@@ -237,6 +237,7 @@ func hop(_ body: @escaping @MainActor () -> Void) {
     }
     /// The player chose the Finder way after the copy to the device did not work: step 3 shows its three steps (#491).
     @Published package var finderShown = false
+    @Published package var driveCopyName = ""      // the game "Copy all game data" is on, for the progress line
     @Published package var drive: DriveState?      // the chosen folder's volume and what stops the copy (BuildStore+Send.swift)
     var shellRetry: (framework: String, titleID: String, name: String, archive: String)?
     var shellDeviceChecked = false

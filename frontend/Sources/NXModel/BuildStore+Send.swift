@@ -153,10 +153,12 @@ extension BuildStore {
 
     /// The shared app's framework of the game whose data is packed, when its `msl/` goes along with the game data (GameShaders): only
     /// for a shared app's IPA that leaves the shaders out. Otherwise the IPA holds them and the copy leaves them out.
-    package var packedFramework: String? {
-        let titleID = packedTitleID
+    package var packedFramework: String? { shaderFramework(for: packedTitleID) }
+
+    /// The framework whose `msl/` the copy of a game's data takes along, nil when the IPA holds the shaders.
+    func shaderFramework(for titleID: String, in library: ShellLibrary? = nil) -> String? {
         guard devices.ipaWithoutShaders, !devices.exportOneGame, !titleID.isEmpty else { return nil }
-        return ShellLibrary.load(root: shellRoot).games.first { $0.titleID == titleID }?.framework
+        return (library ?? ShellLibrary.load(root: shellRoot)).games.first { $0.titleID == titleID }?.framework
     }
 
     /// The folder panel, then what the folder's volume says about the game data.
@@ -208,6 +210,74 @@ extension BuildStore {
                     self.send = failed.isEmpty ? .idle : .failed(String(format: self.t("shell.driveFailed"), failed))
                 } else {
                     self.send = .copied(folder: destination)
+                    self.refreshDrive()
+                }
+            }
+        }
+    }
+
+    /// "Copy all game data" can run: a folder is chosen, some game has packed data, and nothing else runs.
+    package var canCopyAllToDrive: Bool { !running && !devices.driveFolder.isEmpty && !sharedAppDataSources().isEmpty }
+
+    /// "Copy all game data": every game with packed data goes to the drive, one after the other, each into its own folder as "Copy game
+    /// data" writes it (with its shaders when the IPA leaves them out). Nothing is built. The space and the file system are checked for
+    /// all of them before anything is written, and files already there at the same size are not copied again.
+    package func copyAllToDrive() {
+        guard canCopyAllToDrive else { return }
+        let sources = sharedAppDataSources(), library = ShellLibrary.load(root: shellRoot)
+        let jobs = sources.map { source in
+            (source: source, name: library.games.first { $0.titleID == source.titleID }?.name ?? source.name,
+             framework: shaderFramework(for: source.titleID, in: library))
+        }
+        buildingGame = false; runningTarget = BuildTarget.ios
+        beginOperation(.sendingGameData, game: jobs.first?.name, titleID: jobs.first?.source.titleID, destination: .folder)
+        running = true; done = false; doneNote = ""; failure = nil; stages = []
+        driveCancel.set(false)
+        driveCopyName = jobs.first?.name ?? ""
+        send = .copying(done: 0, total: 0)
+        let folder = devices.driveFolder, named = devices.driveNamedFolders, cancel = driveCancel
+        DispatchQueue.global(qos: .userInitiated).async {
+            var all: [String: Int64] = [:], have: [String: Int64] = [:]
+            for job in jobs {
+                let id = job.source.titleID + "/"
+                for (path, size) in GameShaders.dataFiles(archive: job.source.archive, framework: job.framework) { all[id + path] = size }
+                for (path, size) in DriveCopy.existingFiles(folder: folder, titleID: job.source.titleID, name: job.name, named: named) { have[id + path] = size }
+            }
+            let total = DriveCopy.bytesToCopy(files: all, have: have)
+            if let volume = DriveCopy.volume(at: folder), let problem = DriveCopy.problem(files: all, have: have, volume: volume) {
+                hop {   // shown where a single game's problem is, nothing was written
+                    self.running = false; self.driveCopyName = ""; self.send = .idle
+                    self.drive = DriveState(volume: volume, needed: total, problem: problem)
+                }
+                return
+            }
+            var failed: String?, last = folder, base: Int64 = 0
+            do {
+                for job in jobs {
+                    hop { self.driveCopyName = job.name }
+                    if let framework = job.framework { try GameShaders.place(framework: framework, in: job.source.archive) }
+                    let files = GameShaders.dataFiles(archive: job.source.archive, framework: job.framework)
+                    let destination = try DriveCopy.prepareDestination(folder: folder, titleID: job.source.titleID, name: job.name, named: named)
+                    var copied: Int64 = 0
+                    try DriveCopy.copy(archive: job.source.archive, files: files, to: destination,
+                                       progress: { done, _ in
+                                           copied = done
+                                           let sum = base + done
+                                           hop { if case .copying = self.send { self.send = .copying(done: sum, total: total) } }
+                                       },
+                                       cancelled: { cancel.value })
+                    base += copied
+                    if job.framework != nil { GameShaders.removeOthers(in: destination, keeping: files) }
+                    last = destination
+                }
+            } catch DriveCopy.CopyError.cancelled { failed = "" }
+            catch { failed = error.localizedDescription }
+            hop {
+                self.running = false; self.driveCopyName = ""
+                if let failed {
+                    self.send = failed.isEmpty ? .idle : .failed(String(format: self.t("shell.driveFailed"), failed))
+                } else {
+                    self.send = .copied(folder: last)
                     self.refreshDrive()
                 }
             }
