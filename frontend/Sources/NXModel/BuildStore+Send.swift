@@ -65,6 +65,11 @@ extension BuildStore {
     /// Step 3 can run once a build packed the game's data and the IPA exists, and nothing else runs.
     package var canSendGameData: Bool { !running && !archivePath.isEmpty && !exportedIPAPath.isEmpty }
 
+    /// Multi-game drive copy is available whenever a drive folder is valid, nothing is running, and at least one game has packed data.
+    package var canSelectGamesForDrive: Bool {
+        !running && !exportedIPAPath.isEmpty && !devices.driveFolder.isEmpty && !sharedAppDataSources().isEmpty
+    }
+
     /// The device button needs a device too, the drive button a folder without a problem.
     package var canSendToDevice: Bool { canSendGameData && !devices.installDevice.isEmpty }
     package var canCopyToDrive: Bool { canSendGameData && drive != nil && drive?.problem == nil && drive?.volume != nil }
@@ -151,16 +156,6 @@ extension BuildStore {
         return ShellLibrary.load(root: shellRoot).games.first { $0.titleID == titleID }?.name ?? packedGameName
     }
 
-    /// The shared app's framework of the game whose data is packed, when its `msl/` goes along with the game data (GameShaders): only
-    /// for a shared app's IPA that leaves the shaders out. Otherwise the IPA holds them and the copy leaves them out.
-    package var packedFramework: String? { shaderFramework(for: packedTitleID) }
-
-    /// The framework whose `msl/` the copy of a game's data takes along, nil when the IPA holds the shaders.
-    func shaderFramework(for titleID: String, in library: ShellLibrary? = nil) -> String? {
-        guard devices.ipaWithoutShaders, !devices.exportOneGame, !titleID.isEmpty else { return nil }
-        return (library ?? ShellLibrary.load(root: shellRoot)).games.first { $0.titleID == titleID }?.framework
-    }
-
     /// The folder panel, then what the folder's volume says about the game data.
     package func chooseDriveFolder() {
         guard let folder = chooseFolder() else { return }
@@ -168,12 +163,75 @@ extension BuildStore {
         refreshDrive()
     }
 
+    /// Total transfer size (archive + externalized `msl/` when applicable) for one `TransferSource`.
+    package func transferSourceBytes(_ source: TransferSource) -> Int64 {
+        let transfer = ShellInstall.transferSources(
+            archive: source.archive,
+            shellRoot: shellRoot,
+            titleID: source.titleID,
+            includeExternalMSL: true
+        )
+        return transfer.sizes.values.reduce(Int64(0)) { partial, value in
+            let (sum, overflow) = partial.addingReportingOverflow(value)
+            return overflow ? Int64.max : sum
+        }
+    }
+
+    /// Combined volume check across multiple `TransferSource` items targeting `folder`.
+    package func driveBatchState(for sources: [TransferSource], folder: String? = nil) -> DriveState? {
+        let targetFolder = folder ?? devices.driveFolder
+        guard !targetFolder.isEmpty, !sources.isEmpty else { return nil }
+        let root = shellRoot, library = ShellLibrary.load(root: root)
+        var totalNeeded: Int64 = 0
+        var maxSingleFile: Int64 = 0
+        for item in sources {
+            let transfer = ShellInstall.transferSources(
+                archive: item.archive,
+                shellRoot: root,
+                titleID: item.titleID,
+                includeExternalMSL: true
+            )
+            let have = driveExistingFiles(folder: targetFolder, source: item, in: library)
+            let needed = DriveCopy.bytesToCopy(files: transfer.sizes, have: have)
+            let (sum, overflow) = totalNeeded.addingReportingOverflow(needed)
+            totalNeeded = overflow ? Int64.max : sum
+            if let biggest = transfer.sizes.values.max(), biggest > maxSingleFile {
+                maxSingleFile = biggest
+            }
+        }
+        guard let volume = DriveCopy.volume(at: targetFolder) else {
+            return DriveState(volume: nil, needed: totalNeeded, problem: nil)
+        }
+        let problem: DriveCopy.Problem?
+        if volume.readOnly {
+            problem = .readOnly
+        } else if DriveCopy.fileSystemName(volume.fileSystem) == "FAT32", maxSingleFile > DriveCopy.fat32FileLimit {
+            problem = .fat32(largest: maxSingleFile)
+        } else if totalNeeded > volume.freeBytes {
+            problem = .noSpace(needed: totalNeeded, free: volume.freeBytes)
+        } else {
+            problem = nil
+        }
+        return DriveState(volume: volume, needed: totalNeeded, problem: problem)
+    }
+
     /// The volume of the chosen folder against the game data the copy still has to write.
     package func refreshDrive() {
         let folder = devices.driveFolder
-        guard !folder.isEmpty, !archivePath.isEmpty else { drive = nil; return }
-        let files = GameShaders.dataFiles(archive: archivePath, framework: packedFramework)
-        let have = DriveCopy.existingFiles(folder: folder, titleID: packedTitleID, name: driveGameName, named: devices.driveNamedFolders)
+        guard !folder.isEmpty else { drive = nil; return }
+        guard !archivePath.isEmpty else {
+            let all = sharedAppDataSources()
+            drive = all.isEmpty ? nil : driveBatchState(for: all, folder: folder)
+            return
+        }
+        let transfer = ShellInstall.transferSources(
+            archive: archivePath,
+            shellRoot: shellRoot,
+            titleID: packedTitleID,
+            includeExternalMSL: true
+        )
+        let files = transfer.sizes
+        let have = driveExistingFiles(folder: folder, source: TransferSource(titleID: packedTitleID, name: driveGameName, archive: archivePath))
         let needed = DriveCopy.bytesToCopy(files: files, have: have)
         guard let volume = DriveCopy.volume(at: folder) else { drive = DriveState(volume: nil, needed: needed, problem: nil); return }
         drive = DriveState(volume: volume, needed: needed, problem: DriveCopy.problem(files: files, have: have, volume: volume))
@@ -184,100 +242,89 @@ extension BuildStore {
     package func copyToDrive() {
         refreshDrive()
         guard canCopyToDrive else { return }
-        buildingGame = false; runningTarget = BuildTarget.ios
-        beginOperation(.sendingGameData, game: packedGameName, titleID: packedTitleID, destination: .folder)
-        running = true; done = false; doneNote = ""; failure = nil; stages = []
-        driveCancel.set(false)
-        send = .copying(done: 0, total: drive?.needed ?? 0)
-        let folder = devices.driveFolder, titleID = packedTitleID, archive = archivePath, cancel = driveCancel
-        let name = driveGameName, named = devices.driveNamedFolders, framework = packedFramework
-        DispatchQueue.global(qos: .userInitiated).async {
-            var destination = DriveCopy.destination(folder: folder, titleID: titleID, name: name, named: named)
-            var failed: String?
-            do {
-                if let framework { try GameShaders.place(framework: framework, in: archive) }
-                let files = GameShaders.dataFiles(archive: archive, framework: framework)
-                destination = try DriveCopy.prepareDestination(folder: folder, titleID: titleID, name: name, named: named)
-                try DriveCopy.copy(archive: archive, files: files, to: destination,
-                                   progress: { done, total in hop { if case .copying = self.send { self.send = .copying(done: done, total: total) } } },
-                                   cancelled: { cancel.value })
-                if framework != nil { GameShaders.removeOthers(in: destination, keeping: files) }
-            } catch DriveCopy.CopyError.cancelled { failed = "" }
-            catch { failed = error.localizedDescription }
-            hop {
-                self.running = false
-                if let failed {
-                    self.send = failed.isEmpty ? .idle : .failed(String(format: self.t("shell.driveFailed"), failed))
-                } else {
-                    self.send = .copied(folder: destination)
-                    self.refreshDrive()
-                }
-            }
-        }
+        copySourcesToDrive([TransferSource(titleID: packedTitleID, name: packedGameName, archive: archivePath)], singleGame: true)
     }
 
-    /// "Copy all game data" can run: a folder is chosen, some game has packed data, and nothing else runs.
-    package var canCopyAllToDrive: Bool { !running && !devices.driveFolder.isEmpty && !sharedAppDataSources().isEmpty }
+    /// Copies the checked games from `sharedAppDataSources()` into `<driveFolder>/<title ID>/` sequentially on a background queue.
+    package func copySelectedToDrive(titleIDs: Set<String>) {
+        guard !running else { return }
+        let wanted = Set(titleIDs.map { $0.uppercased() })
+        let chosen = sharedAppDataSources().filter { wanted.contains($0.titleID.uppercased()) }
+        guard !chosen.isEmpty else { return }
+        let state = driveBatchState(for: chosen)
+        drive = state
+        guard let state, state.problem == nil, state.volume != nil else { return }
+        copySourcesToDrive(chosen, singleGame: chosen.count == 1)
+    }
 
-    /// "Copy all game data": every game with packed data goes to the drive, one after the other, each into its own folder as "Copy game
-    /// data" writes it (with its shaders when the IPA leaves them out). Nothing is built. The space and the file system are checked for
-    /// all of them before anything is written, and files already there at the same size are not copied again.
-    package func copyAllToDrive() {
-        guard canCopyAllToDrive else { return }
-        let sources = sharedAppDataSources(), library = ShellLibrary.load(root: shellRoot)
-        let jobs = sources.map { source in
-            (source: source, name: library.games.first { $0.titleID == source.titleID }?.name ?? source.name,
-             framework: shaderFramework(for: source.titleID, in: library))
+    private func copySourcesToDrive(_ sources: [TransferSource], singleGame: Bool) {
+        guard let first = sources.first else { return }
+        let folder = devices.driveFolder, root = shellRoot, cancel = driveCancel, named = devices.driveNamedFolders
+        let library = ShellLibrary.load(root: root)
+        var names: [String: String] = [:]
+        for src in sources { names[src.titleID] = driveName(for: src, in: library) }
+        let prepared: [(source: TransferSource, sizes: [String: Int64], origins: [String: String], needed: Int64)] = sources.map { src in
+            let transfer = ShellInstall.transferSources(archive: src.archive, shellRoot: root, titleID: src.titleID, includeExternalMSL: true)
+            let have = driveExistingFiles(folder: folder, source: src, in: library)
+            let needed = DriveCopy.bytesToCopy(files: transfer.sizes, have: have)
+            return (src, transfer.sizes, transfer.origins, needed)
+        }
+        let overallTotal = prepared.reduce(Int64(0)) { partial, item in
+            let (sum, overflow) = partial.addingReportingOverflow(item.needed)
+            return overflow ? Int64.max : sum
         }
         buildingGame = false; runningTarget = BuildTarget.ios
-        beginOperation(.sendingGameData, game: jobs.first?.name, titleID: jobs.first?.source.titleID, destination: .folder)
+        beginOperation(.sendingGameData, game: singleGame ? first.name : "\(sources.count)", titleID: first.titleID, destination: .folder)
         running = true; done = false; doneNote = ""; failure = nil; stages = []
+        driveBatchLabel = singleGame ? first.name : "1/\(sources.count) · \(first.name)"
         driveCancel.set(false)
-        driveCopyName = jobs.first?.name ?? ""
-        send = .copying(done: 0, total: 0)
-        let folder = devices.driveFolder, named = devices.driveNamedFolders, cancel = driveCancel
+        send = .copying(done: 0, total: overallTotal)
         DispatchQueue.global(qos: .userInitiated).async {
-            var all: [String: Int64] = [:], have: [String: Int64] = [:]
-            for job in jobs {
-                let id = job.source.titleID + "/"
-                for (path, size) in GameShaders.dataFiles(archive: job.source.archive, framework: job.framework) { all[id + path] = size }
-                for (path, size) in DriveCopy.existingFiles(folder: folder, titleID: job.source.titleID, name: job.name, named: named) { have[id + path] = size }
-            }
-            let total = DriveCopy.bytesToCopy(files: all, have: have)
-            if let volume = DriveCopy.volume(at: folder), let problem = DriveCopy.problem(files: all, have: have, volume: volume) {
-                hop {   // shown where a single game's problem is, nothing was written
-                    self.running = false; self.driveCopyName = ""; self.send = .idle
-                    self.drive = DriveState(volume: volume, needed: total, problem: problem)
+            var completedBytes: Int64 = 0
+            var lastDest = DriveCopy.destination(folder: folder, titleID: first.titleID, name: names[first.titleID] ?? first.name, named: named)
+            var failed: String?
+            for (index, item) in prepared.enumerated() {
+                if cancel.value { failed = ""; break }
+                let label = singleGame ? item.source.name : "\(index + 1)/\(prepared.count) · \(item.source.name)"
+                hop { self.driveBatchLabel = label }
+                let name = names[item.source.titleID] ?? item.source.name
+                var destination = DriveCopy.destination(folder: folder, titleID: item.source.titleID, name: name, named: named)
+                let baseDone = completedBytes
+                do {
+                    // The game's folder under the other naming is renamed, so what it holds is not copied again
+                    destination = try DriveCopy.prepareDestination(folder: folder, titleID: item.source.titleID, name: name, named: named)
+                    lastDest = destination
+                    try DriveCopy.copy(
+                        archive: item.source.archive,
+                        files: item.sizes,
+                        origins: item.origins,
+                        to: destination,
+                        progress: { itemDone, _ in
+                            let current = min(overallTotal, baseDone + itemDone)
+                            hop {
+                                if case .copying = self.send {
+                                    self.send = .copying(done: current, total: overallTotal)
+                                }
+                            }
+                        },
+                        cancelled: { cancel.value }
+                    )
+                    completedBytes = min(overallTotal, baseDone + item.needed)
+                } catch DriveCopy.CopyError.cancelled {
+                    failed = ""
+                    break
+                } catch {
+                    failed = error.localizedDescription
+                    break
                 }
-                return
             }
-            var failed: String?, last = folder, base: Int64 = 0
-            do {
-                for job in jobs {
-                    hop { self.driveCopyName = job.name }
-                    if let framework = job.framework { try GameShaders.place(framework: framework, in: job.source.archive) }
-                    let files = GameShaders.dataFiles(archive: job.source.archive, framework: job.framework)
-                    let destination = try DriveCopy.prepareDestination(folder: folder, titleID: job.source.titleID, name: job.name, named: named)
-                    var copied: Int64 = 0
-                    try DriveCopy.copy(archive: job.source.archive, files: files, to: destination,
-                                       progress: { done, _ in
-                                           copied = done
-                                           let sum = base + done
-                                           hop { if case .copying = self.send { self.send = .copying(done: sum, total: total) } }
-                                       },
-                                       cancelled: { cancel.value })
-                    base += copied
-                    if job.framework != nil { GameShaders.removeOthers(in: destination, keeping: files) }
-                    last = destination
-                }
-            } catch DriveCopy.CopyError.cancelled { failed = "" }
-            catch { failed = error.localizedDescription }
             hop {
-                self.running = false; self.driveCopyName = ""
+                self.running = false
+                self.driveBatchLabel = ""
                 if let failed {
                     self.send = failed.isEmpty ? .idle : .failed(String(format: self.t("shell.driveFailed"), failed))
                 } else {
-                    self.send = .copied(folder: last)
+                    self.send = .copied(folder: lastDest)
                     self.refreshDrive()
                 }
             }

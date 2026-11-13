@@ -44,7 +44,7 @@ extension LauncherView {
     }
 
     var emptyLibrary: some View {
-        let hasSkipped = !library.skippedItems.isEmpty
+        let hasSkipped = library.showsSkippedBanner
         return VStack(alignment: .leading, spacing: hasSkipped ? 16 : 22) {
             Spacer()
             Image(systemName: "gamecontroller").font(.system(size: 44, weight: .light))
@@ -67,9 +67,12 @@ extension LauncherView {
                     .font(.manrope(14)).foregroundStyle(.secondary)
             }.buttonStyle(.plain).launcherHover(enabled: artworkEditor == nil)
             if hasSkipped {
-                LibrarySkippedBanner(items: library.skippedItems, enabled: artworkEditor == nil) {
-                    skippedItemsOpen = true
-                }
+                LibrarySkippedBanner(
+                    items: library.skippedItems,
+                    enabled: artworkEditor == nil,
+                    openDetails: { skippedItemsOpen = true },
+                    dismiss: { library.dismissSkippedBanner() }
+                )
                 .frame(maxWidth: 660)
                 .padding(.top, 4)
             }
@@ -266,10 +269,13 @@ extension LauncherView {
                 Text(String(format: loc.t("library.gameCount"), libraryFilter == .owned ? library.games.count : library.games.filter(libraryFilter.includes).count))
                     .font(.manrope(12)).foregroundStyle(.secondary)
             }
-            if !library.skippedItems.isEmpty {
-                LibrarySkippedBanner(items: library.skippedItems, enabled: artworkEditor == nil) {
-                    skippedItemsOpen = true
-                }
+            if library.showsSkippedBanner {
+                LibrarySkippedBanner(
+                    items: library.skippedItems,
+                    enabled: artworkEditor == nil,
+                    openDetails: { skippedItemsOpen = true },
+                    dismiss: { library.dismissSkippedBanner() }
+                )
             }
             if games.isEmpty {
                 Text(loc.t("library.noResults")).foregroundStyle(.secondary).padding(.vertical, 28)
@@ -358,7 +364,13 @@ extension LauncherView {
     /// An outlined pill that adds games to the build queue: one game, or all that were built with older tools. It starts nothing itself.
     func heroRebuildButton(_ title: String, id: String, games: [LibraryGame], frosted: Bool = false) -> some View {
         let add = {
-            if !m.running { stores.queue.enqueue(games.map { QueueEntry(game: $0, engineID: stores.engineSync.selection.engineID) }) }
+            guard !m.running else { return }
+            let batch = UUID()
+            stores.queue.enqueue(games.map {
+                QueueEntry(game: $0, engineID: stores.engineSync.selection.engineID, target: m.target, batch: batch,
+                           packageAfter: m.target != BuildTarget.mac && !m.exportsOneGame)
+            })
+            page = .builds
         }
         return Button(action: add) {
             Label(title, systemImage: "arrow.clockwise")

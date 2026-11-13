@@ -170,7 +170,6 @@ struct LauncherView: View {
             }
         }
         .onChange(of: consoleDriver.state.padMerge) { merged in if injectedDriver { controls.padMerge = merged } }
-        .onChange(of: consoleDriver.state.joyconSplit) { split in if injectedDriver { controls.joyconSplit = split } }
         .onChange(of: consolePrompt) { open in
             padFocus.scope = open ? "console.entry" : currentPadScope
             if open { padFocus.focused = "console.entry.enter" }
@@ -349,7 +348,7 @@ struct LauncherView: View {
         .deleteGameSheet($deleting, shellRoot: m.shellCachePath, library: library, loc: loc, pad: padFocus, scope: { currentPadScope })
         .libraryDiagnosticsWiring(library: library, repo: repo, engine: engine, verified: verifiedProfiles, skippedOpen: $skippedItemsOpen, pad: padFocus, scope: { currentPadScope }, openKeysSettings: openKeysSettingsFromDiagnostics)
         .sheet(isPresented: $selectingGames) {
-            BuildSelectedSheet(library: library, queue: stores.queue, engineID: engine.selection.engineID, exportsIPA: devices.exportIPA) { selectingGames = false }
+            BuildSelectedSheet(library: library, queue: stores.queue, engineID: engine.selection.engineID, target: m.target, packagesSharedApp: !m.exportsOneGame) { selectingGames = false }
                 .environmentObject(loc)
         }
         .sheet(isPresented: Binding(get: { supportedGames != nil }, set: { if !$0 { supportedGames = nil } })) {

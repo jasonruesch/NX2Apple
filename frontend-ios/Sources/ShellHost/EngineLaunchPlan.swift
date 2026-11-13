@@ -27,35 +27,6 @@ public struct EngineLaunchPlan: Equatable, Sendable {
     /// environment, game env.txt, game mods folder, shared env.txt, framework dm/env.txt.
     /// The framework file carries build-time defaults such as CPU BC decoding for older GPUs (#719). Automatic `DM_PSO_BUNDLE`
     /// discovery is a fallback after all env files, so an explicit archive path or `off` can override it.
-    /// Whether `msl` holds the libraries of the chain the game was built with: `b-<chain>.img` or `b-<chain>/`, or `vk/` or `gl/`
-    /// for a Vulkan or GL game, the paths the engine reads under `DM_MSL_DIR`. Shaders copied for an older build of the game's code
-    /// would not load.
-    static func holdsShaders(_ msl: URL, chain: String, fileManager fm: FileManager = .default) -> Bool {
-        var isDir: ObjCBool = false
-        if fm.fileExists(atPath: msl.appendingPathComponent(chain + ".img").path, isDirectory: &isDir), !isDir.boolValue { return true }
-        return [chain, "vk", "gl"].contains { fm.fileExists(atPath: msl.appendingPathComponent($0).path, isDirectory: &isDir) && isDir.boolValue }
-    }
-
-    /// The game's own shaders, outside the IPA: `msl/` in its app folder (`Documents/games/<title ID>/`, where the launcher's copy to
-    /// the device puts them), else `msl/` beside its data (on a drive or in a picked folder, next to the RomFS). Each counts only when
-    /// it holds the game's chain (`holdsShaders`), so stale shaders fall back to the IPA's own.
-    static func ownShaders(for game: LaunchableGame, fileManager fm: FileManager = .default) -> URL? {
-        [game.appFolder, game.dataURL].map { $0.appendingPathComponent("msl", isDirectory: true) }
-            .first { holdsShaders($0, chain: game.manifest.chain, fileManager: fm) }
-    }
-
-    /// The IPA left the game's shaders out (GameShaders.externalMarker in the Mac launcher) and neither the app folder nor the data
-    /// folder holds them: the game cannot start until its game data, which carries them, is copied again.
-    public static func shadersMissing(framework: URL, chain: String, appFolder: URL, dataFolder: URL?, fileManager fm: FileManager = .default) -> Bool {
-        guard fm.fileExists(atPath: framework.appendingPathComponent(externalShadersMarker).path) else { return false }
-        return !([appFolder] + (dataFolder.map { [$0] } ?? [])).contains {
-            holdsShaders($0.appendingPathComponent("msl", isDirectory: true), chain: chain, fileManager: fm)
-        }
-    }
-
-    /// The file a framework holds instead of `msl/` when the IPA left its shaders out.
-    public static let externalShadersMarker = "msl-with-game-data"
-
     public static func make(game: LaunchableGame, appResources: URL, documents: URL, envFileText: String?, gameEnvFileText: String? = nil,
                             fileManager fm: FileManager = .default) -> EngineLaunchPlan {
         let manifest = game.manifest, fw = game.frameworkURL, gdir = game.appFolder
@@ -74,8 +45,18 @@ public struct EngineLaunchPlan: Equatable, Sendable {
         env["DM_SAVE"] = save.path
         env["DM_TEMP"] = temp.path
         env["DM_NVN_SHMAP"] = fw.appendingPathComponent(manifest.shaderMap).path
+        let ownMSL = gdir.appendingPathComponent("msl", isDirectory: true)
+        let dataMSL = game.dataURL.appendingPathComponent("msl", isDirectory: true)
         let bundledMSL = game.shaderResourcesURL ?? fw.appendingPathComponent("msl", isDirectory: true)
-        env["DM_MSL_DIR"] = (ownShaders(for: game, fileManager: fm) ?? bundledMSL).path
+        let resolvedMSL: URL
+        if ExternalShaders.isUsableOverride(at: ownMSL, fileManager: fm) {
+            resolvedMSL = ownMSL
+        } else if ExternalShaders.isUsableOverride(at: dataMSL, fileManager: fm) {
+            resolvedMSL = dataMSL
+        } else {
+            resolvedMSL = bundledMSL
+        }
+        env["DM_MSL_DIR"] = resolvedMSL.path
         let ownPSO = gdir.appendingPathComponent("pso", isDirectory: true), fwPSO = fw.appendingPathComponent("pso", isDirectory: true)
         let dataAOC = game.dataURL.appendingPathComponent("aoc", isDirectory: true), ownAOC = gdir.appendingPathComponent("aoc", isDirectory: true)
         if isDirectory(dataAOC) { env["DM_AOC_DIR"] = dataAOC.path } else if isDirectory(ownAOC) { env["DM_AOC_DIR"] = ownAOC.path }

@@ -13,8 +13,6 @@ import NXModel
     override func setUpWithError() throws {
         temporary = fm.temporaryDirectory.appendingPathComponent("nspb-drive-names-" + UUID().uuidString)
         try fm.createDirectory(at: temporary, withIntermediateDirectories: true)
-        // The store reads the shared app's library for the game's name and shaders: never this Mac's own
-        testDefaults.set(path("shell"), forKey: "shellRoot")
     }
 
     override func tearDownWithError() throws { try fm.removeItem(at: temporary) }
@@ -94,8 +92,6 @@ import NXModel
         try write(archive + "/aoc/1.img", "abcd")
         let drive = path("drive")
         try write(drive + "/" + titleID + "/romfs.img", "0123456789")   // a copy from before, under the title ID
-        try ShellLibrary(games: [ShellLibrary.Game(titleID: titleID, name: "Metroid Dread", framework: path("shell/frameworks/DmGame\(titleID).framework"))])
-            .save(root: path("shell"))
         let stores = LauncherStores(defaults: testDefaults); let model = stores.build
         model.archivePath = archive
         model.exportedIPAPath = path("export/NX2Apple.ipa")
@@ -114,93 +110,5 @@ import NXModel
         XCTAssertEqual(try String(contentsOfFile: named + "/aoc/1.img"), "abcd")
         XCTAssertFalse(fm.fileExists(atPath: drive + "/" + titleID))
         if case .copied(let folder) = model.send { XCTAssertEqual(folder, named) } else { XCTFail("not copied") }
-    }
-
-    func testTheDriveCopyTakesTheGamesShadersAlongAndDropsAnOlderChain() throws {
-        let archive = path("out/games", titleID), shell = path("shell"), framework = shell + "/frameworks/DmGame\(titleID).framework"
-        try write(archive + "/romfs.img", "0123456789")
-        try write(framework + "/msl/b-new.img", "library")
-        try ShellLibrary(games: [ShellLibrary.Game(titleID: titleID, name: "Metroid Dread", framework: framework)]).save(root: shell)
-        let drive = path("drive")
-        try write(drive + "/" + titleID + "/msl/b-old.img", "an older chain")
-        let stores = LauncherStores(defaults: testDefaults); let model = stores.build
-        model.archivePath = archive
-        model.exportedIPAPath = path("export/NX2Apple.ipa")
-        stores.deviceStore.driveFolder = drive
-        model.refreshDrive()
-        XCTAssertEqual(model.drive?.needed, 10, "an IPA that holds the shaders: the copy leaves them out")
-        stores.deviceStore.ipaWithoutShaders = true
-        model.refreshDrive()
-        XCTAssertEqual(model.drive?.needed, 17, "the space check counts the shaders before they are placed")
-        let copied = expectation(description: "Copied")
-        let token = model.$send.sink { if case .copied = $0 { copied.fulfill() } }
-        model.copyToDrive()
-        wait(for: [copied], timeout: 30)
-        withExtendedLifetime(token) {}
-        XCTAssertEqual(try String(contentsOfFile: archive + "/msl/b-new.img"), "library", "the game data folder holds them for the next copy too")
-        XCTAssertEqual(try String(contentsOfFile: drive + "/" + titleID + "/msl/b-new.img"), "library")
-        XCTAssertFalse(fm.fileExists(atPath: drive + "/" + titleID + "/msl/b-old.img"))
-    }
-
-    func testLeavingTheShadersOutIsOffUntilTurnedOnAndRemembered() {
-        let devices = LauncherStores(defaults: testDefaults).deviceStore
-        XCTAssertFalse(devices.ipaWithoutShaders)
-        devices.ipaWithoutShaders = true
-        XCTAssertTrue(LauncherStores(defaults: testDefaults).deviceStore.ipaWithoutShaders)
-    }
-
-    func testCopyAllSendsEveryGameWithPackedDataIntoItsOwnFolder() throws {
-        let other = "0100000000010000"
-        let first = path("out/games", titleID), second = path("out/games", other), shell = path("shell")
-        try write(first + "/romfs.img", "0123456789")
-        try write(second + "/romfs.img", "abcdef")
-        try write(second + "/aoc/1.img", "dlc")
-        let framework = shell + "/frameworks/DmGame\(other).framework"
-        try write(framework + "/msl/b-new.img", "library")
-        try ShellLibrary(games: [ShellLibrary.Game(titleID: titleID, name: "Metroid Dread", framework: shell + "/frameworks/DmGame\(titleID).framework"),
-                                 ShellLibrary.Game(titleID: other, name: "Super Mario Odyssey", framework: framework)]).save(root: shell)
-        let drive = path("drive")
-        try write(drive + "/Metroid Dread (\(titleID))/romfs.img", "0123456789")   // already there: not copied again
-        let stores = LauncherStores(defaults: testDefaults); let model = stores.build
-        model.sharedAppDataSources = { [TransferSource(titleID: self.titleID, name: "Metroid Dread", archive: first),
-                                        TransferSource(titleID: other, name: "Super Mario Odyssey", archive: second)] }
-        XCTAssertFalse(model.canCopyAllToDrive, "no folder yet")
-        stores.deviceStore.driveFolder = drive
-        stores.deviceStore.driveNamedFolders = true
-        stores.deviceStore.ipaWithoutShaders = true
-        XCTAssertTrue(model.canCopyAllToDrive, "no build is needed")
-        var totals: [Int64] = []
-        let copied = expectation(description: "Copied")
-        let token = model.$send.sink {
-            if case .copying(_, let total) = $0, total > 0 { totals.append(total) }
-            if case .copied = $0 { copied.fulfill() }
-        }
-        model.copyAllToDrive()
-        wait(for: [copied], timeout: 30)
-        withExtendedLifetime(token) {}
-        XCTAssertEqual(Set(totals), [16], "one total for every game: what is missing, the shaders included")
-        let odyssey = drive + "/Super Mario Odyssey (\(other))"
-        XCTAssertEqual(try String(contentsOfFile: odyssey + "/romfs.img"), "abcdef")
-        XCTAssertEqual(try String(contentsOfFile: odyssey + "/aoc/1.img"), "dlc")
-        XCTAssertEqual(try String(contentsOfFile: odyssey + "/msl/b-new.img"), "library")
-        XCTAssertFalse(fm.fileExists(atPath: drive + "/Metroid Dread (\(titleID))/msl"), "a framework without shaders sends none")
-        XCTAssertFalse(model.running)
-        XCTAssertEqual(model.driveCopyName, "")
-    }
-
-    func testCopyAllStopsBeforeWritingWhenTheDriveIsTooSmall() throws {
-        let archive = path("out/games", titleID)
-        try write(archive + "/romfs.img", "0123456789")
-        let stores = LauncherStores(defaults: testDefaults); let model = stores.build
-        model.sharedAppDataSources = { [TransferSource(titleID: self.titleID, name: "Metroid Dread", archive: archive)] }
-        stores.deviceStore.driveFolder = "/dev"   // devfs: no free space and no room for a folder
-        let checked = expectation(description: "Checked")
-        let token = model.$running.dropFirst(2).sink { if !$0 { checked.fulfill() } }
-        model.copyAllToDrive()
-        wait(for: [checked], timeout: 30)
-        withExtendedLifetime(token) {}
-        XCTAssertEqual(model.send, .idle)
-        XCTAssertNotNil(model.drive?.problem)
-        XCTAssertFalse(fm.fileExists(atPath: "/dev/" + titleID))
     }
 }

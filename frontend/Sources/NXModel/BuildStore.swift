@@ -40,8 +40,6 @@ package struct FilePick: Equatable {
     var ipaTeam: String { get }
     /// The bundle ID the player typed for the shared app's IPA, empty for the default.
     var ipaBundleID: String { get }
-    /// The shared app's IPA leaves the games' shaders out: they go to the device with the game data.
-    var ipaWithoutShaders: Bool { get }
     /// The folder the game data is copied to (a drive), empty when none is chosen.
     var driveFolder: String { get set }
     /// The drive copy names each game's folder `<game name> (<title ID>)` instead of the title ID.
@@ -63,7 +61,6 @@ extension InstallTarget {
     package func refreshDevices() async {}
     package var ipaTeam: String { "" }
     package var ipaBundleID: String { "" }
-    package var ipaWithoutShaders: Bool { false }
     /// The IPA's bundle ID as the export uses it: trimmed, empty for the default.
     package var ipaBundleIDChoice: String { ipaBundleID.trimmingCharacters(in: .whitespacesAndNewlines) }
     /// The chosen bundle ID can be used (an empty one keeps the default).
@@ -237,9 +234,10 @@ func hop(_ body: @escaping @MainActor () -> Void) {
     }
     /// The player chose the Finder way after the copy to the device did not work: step 3 shows its three steps (#491).
     @Published package var finderShown = false
-    @Published package var driveCopyName = ""      // the game "Copy all game data" is on, for the progress line
     @Published package var drive: DriveState?      // the chosen folder's volume and what stops the copy (BuildStore+Send.swift)
+    @Published package var driveBatchLabel = ""    // active game label during a multi-game drive copy ("1/3 · Hades")
     var shellRetry: (framework: String, titleID: String, name: String, archive: String)?
+    var shellBatchRetry: [DeferredShellGame]?
     var shellDeviceChecked = false
     package let driveCancel = LockedFlag()   // Stop of the copy to a drive (BuildStore+Send.swift)
     @Published package var shellMove: ShellMove = .idle   // Move cache folder (BuildStore+ShellRoot.swift, #427)
@@ -256,13 +254,35 @@ func hop(_ body: @escaping @MainActor () -> Void) {
     package var macFallbackIconArguments: (String) -> [String] = { _ in [] }
     /// The transfer queue (#1036), which the app wires. Sending data goes through it so that a build can run beside it.
     package weak var transfers: TransferQueueStore?
+    /// The build queue (#943), wired by the app so the Build page's start actions can run a staged queue batch.
+    package weak var queue: BuildQueueStore? {
+        didSet {
+            let count = queue?.queued.count ?? 0
+            if queuedCount != count { queuedCount = count }
+            queueSubscription = queue?.$entries.sink { [weak self] entries in
+                let next = entries.filter { $0.status == .queued }.count
+                if self?.queuedCount != next { self?.queuedCount = next }
+            }
+        }
+    }
+    @Published package private(set) var queuedCount = 0
+    private var queueSubscription: AnyCancellable?
     /// The running send of each transfer asks this flag whether it was cancelled.
     var transferCancels: [UUID: LockedFlag] = [:]
-    /// A queued shared-app batch builds each game and packages the app once at the end (#997): the games built so far wait here.
+    /// A queued shared-app batch builds each game and packages or installs the app once at the end (#997).
     package var deferShellPackaging = false
+    var deferredExportsIPA = false
+    package var queuedExportIPA: Bool?
+    package var queuedExportOneGame: Bool?
+    var skipStaleCheckForQueuedEntry = false
+    var afterStaleFrameworks: (() -> Void)?
+    package var activeQueuedGameID: UUID?
     /// Stop was pressed during the running work (the queue pauses after it). Cleared when the next build starts.
     package var stoppedByPlayer = false
-    var deferredShell: [(framework: String, titleID: String, name: String)] = []
+    var deferredShell: [DeferredShellGame] = []
+    package var pickedArtworkForTitleID: (String) -> String? = { _ in nil }
+    package var onBatchShellInstalled: ([DeferredShellGame], String, String) -> Void = { _, _, _ in }
+    package var onBuiltGamesInstalled: (String, String) -> Void = { _, _ in }
     package var chooseKeys: (() -> Void)?          // tests stand in for the file picker
     /// The open panel: the paths the player picked, none when they cancelled.
     package var choosePaths: (FilePick) -> [String] = { _ in [] }
@@ -350,9 +370,9 @@ func hop(_ body: @escaping @MainActor () -> Void) {
 
     /// This iPhone build goes straight to a device.
     /// An iPhone or iPad build that makes the shared app as an unsigned IPA (#416): no device, no team.
-    package var exportsShell: Bool { target != BuildTarget.mac && devices.exportIPA }
+    package var exportsShell: Bool { target != BuildTarget.mac && (queuedExportIPA ?? devices.exportIPA) }
     /// An export of one game's own IPA with the game data inside (#540): the engine's one-game app, no shared app, nothing to send.
-    package var exportsOneGame: Bool { exportsShell && devices.exportOneGame }
+    package var exportsOneGame: Bool { exportsShell && (queuedExportOneGame ?? devices.exportOneGame) }
     package var installsDirectly: Bool { target != BuildTarget.mac && !devices.installDevice.isEmpty && !devices.signingTeam.isEmpty }
 
     /// Home shown as ~ (shorter in a one-line row, and it keeps the account name out of screenshots).

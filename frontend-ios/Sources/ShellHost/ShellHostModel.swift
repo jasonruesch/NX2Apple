@@ -8,8 +8,10 @@ import UIKit
 
 /// Where the host finds things. Everything the model touches outside itself is here, so tests point it at a temporary folder.
 public struct ShellHostConfig: Sendable {
-    /// `Games/`: one `<title ID>/` bundle folder per game.
+    /// `Games/`: one `<title ID>/` bundle folder per game, or `Bundle.main.privateFrameworksURL`.
     public var gamesRoot: URL
+    /// Optional writable `Documents/Frameworks/` directory where hot-pushed `DmGame<ID>.framework` bundles live.
+    public var hotFrameworksRoot: URL?
     /// The app's `Documents/games/`: `<title ID>/` holds a game's data, save, temp and log.txt (patch 0003's layout).
     public var appDataRoot: URL
     public var environment: HostEnvironment
@@ -25,13 +27,15 @@ public struct ShellHostConfig: Sendable {
     public var joinPartSize: Int64
     var onJoinProgress: (@Sendable (DataParts.Progress) -> Void)?
 
-    public init(gamesRoot: URL, appDataRoot: URL, environment: HostEnvironment = HostEnvironment(), updateURL: URL? = nil,
+    public init(gamesRoot: URL, appDataRoot: URL, hotFrameworksRoot: URL? = nil,
+                environment: HostEnvironment = HostEnvironment(), updateURL: URL? = nil,
                 defaults: @escaping @Sendable (String) -> UserDefaults = GameDefaults.suite(for:),
                 openURL: @escaping @MainActor @Sendable (URL) -> Void = ShellHostConfig.systemOpen,
                 now: @escaping @Sendable () -> Date = { Date() },
                 provisioningExpiration: @escaping @Sendable () -> Date? = { ProvisioningProfile.bundledExpiration() },
                 joinPartSize: Int64 = DataParts.partSize) {
         self.gamesRoot = gamesRoot
+        self.hotFrameworksRoot = hotFrameworksRoot
         self.appDataRoot = appDataRoot
         self.environment = environment
         self.updateURL = updateURL
@@ -53,6 +57,12 @@ public struct ShellHostConfig: Sendable {
     public static func defaultAppDataRoot() -> URL {
         (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("games", isDirectory: true)
+    }
+
+    /// The app's writable `Documents/Frameworks/` directory for hot-pushed game frameworks.
+    public static func defaultHotFrameworksRoot() -> URL {
+        (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory)
+            .appendingPathComponent("Frameworks", isDirectory: true)
     }
 }
 
@@ -105,6 +115,8 @@ public struct ShellHostConfig: Sendable {
     @ObservationIgnored private var startupJoinTask: Task<Void, Never>?
     @ObservationIgnored private var joinGeneration: UInt64 = 0
     @ObservationIgnored private var joiningProgress: [String: DataParts.Progress] = [:]
+    @ObservationIgnored private var looseClaimTask: Task<Void, Never>?
+    @ObservationIgnored private var looseClaimGeneration: UInt64 = 0
     @ObservationIgnored private var pickGeneration: [String: UInt64] = [:]
     @ObservationIgnored private var pickedDataNotes: [String: String] = [:]
     @ObservationIgnored private var cloudCheckGeneration: UInt64 = 0
@@ -115,6 +127,7 @@ public struct ShellHostConfig: Sendable {
     @ObservationIgnored private var signingCheckTask: Task<Void, Never>?
     @ObservationIgnored private var signingWarningDismissed = false
     @ObservationIgnored nonisolated(unsafe) private var defaultsObserver: (any NSObjectProtocol)?
+    @ObservationIgnored nonisolated(unsafe) private var foregroundObserver: (any NSObjectProtocol)?
 
     public init(config: ShellHostConfig, launcher: any GameLauncher = StubGameLauncher(), picker: any FolderPicker = NoFolderPicker(),
                 shellSettings: ShellSettingsStore = .current) {
@@ -140,12 +153,17 @@ public struct ShellHostConfig: Sendable {
             }
             progressHook?(progress)
         }
+        let gamesRoot = config.gamesRoot
+        let hotRoot = config.hotFrameworksRoot
         startupJoinTask = Task { [weak self] in
             let joined = await Task.detached(priority: .utility) { () -> Bool in
-                DataParts.writeFeatures(documents: dataRoot.deletingLastPathComponent())
+                let documents = dataRoot.deletingLastPathComponent()
+                DataParts.writeFeatures(documents: documents)
                 let joined = DataParts.joinAll(appDataRoot: dataRoot, partSize: partSize, onProgress: reportProgress)
+                let allEntries = GameCatalogue.scan(root: gamesRoot, hotRoot: hotRoot)
+                let claimed = LooseRomfsClaimer.claimAll(documents: documents, appDataRoot: dataRoot, entries: allEntries)
                 BackupExclusion.apply(appDataRoot: dataRoot)
-                return !joined.isEmpty
+                return !joined.isEmpty || !claimed.isEmpty
             }.value
             self?.finishJoinRun(joined: joined, generation: joinGen)
         }
@@ -156,13 +174,24 @@ public struct ShellHostConfig: Sendable {
             guard let self, !self.signingWarningDismissed else { return }
             self.signingWarning = ProvisioningProfile.warning(expiration: expiration, now: clock())
         }
-        reload()
+        reload(afterClaim: true)
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.defaultsDidChange() }
         }
+        #if canImport(UIKit)
+        foregroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.launchingGame else { return }
+                self.reload()
+            }
+        }
+        #endif
     }
 
-    deinit { defaultsObserver.map(NotificationCenter.default.removeObserver) }
+    deinit {
+        defaultsObserver.map(NotificationCenter.default.removeObserver)
+        foregroundObserver.map(NotificationCenter.default.removeObserver)
+    }
 
     /// Shell choices that change the displayed game defaults.
     private static func choices(of settings: ShellSettingsStore) -> [String] {
@@ -190,6 +219,7 @@ public struct ShellHostConfig: Sendable {
 
     func waitForStartupTasks() async {
         await startupJoinTask?.value
+        await looseClaimTask?.value
         await signingCheckTask?.value
         await backupScanTask?.value
         for task in romfsChecks.values.compactMap(\.task) {
@@ -210,7 +240,7 @@ public struct ShellHostConfig: Sendable {
         let affected = Array(joiningProgress.keys)
         joiningProgress.removeAll()
         if joined {
-            reload()
+            reload(afterClaim: true)
         } else {
             for id in affected { refresh(id) }
         }
@@ -277,6 +307,8 @@ public struct ShellHostConfig: Sendable {
 
     /// For tests: returns when the shell scan and the pending RomFS identity checks are done.
     func waitForDataChecks() async {
+        await startupJoinTask?.value
+        await looseClaimTask?.value
         await shellScan?.value
         await signingCheckTask?.value
         await backupScanTask?.value
@@ -292,8 +324,12 @@ public struct ShellHostConfig: Sendable {
     /// Reads the games folder again and sorts the library (see `LibraryOrder`). Only this and the first load re-sort:
     /// a change to one game updates it in place.
     public func reload() {
+        reload(afterClaim: false)
+    }
+
+    private func reload(afterClaim: Bool) {
         forgetCheckedRomfsImages()
-        let scanned = GameCatalogue.scan(root: config.gamesRoot).filter { !isDeleted($0) }
+        let scanned = GameCatalogue.scan(root: config.gamesRoot, hotRoot: config.hotFrameworksRoot).filter { !isDeleted($0) }
         let built = scanned.map(detail(for:))
         let order = LibraryOrder.ids(of: built.map(\.game), lastPlayed: Dictionary(uniqueKeysWithValues: scanned.compactMap { e in
             lastPlayed(e.id).map { (e.id, $0) } }))
@@ -302,6 +338,36 @@ public struct ShellHostConfig: Sendable {
         details = built.sorted { position[$0.id] ?? 0 < position[$1.id] ?? 0 }
         startShellScan(force: true)
         startBackupScan()
+        if !afterClaim && !launchingGame {
+            startLooseRomfsClaim()
+        }
+    }
+
+    private func startLooseRomfsClaim() {
+        looseClaimTask?.cancel()
+        looseClaimGeneration &+= 1
+        let generation = looseClaimGeneration
+        let gamesRoot = config.gamesRoot
+        let hotRoot = config.hotFrameworksRoot
+        let dataRoot = config.appDataRoot
+        let joinTask = startupJoinTask
+        looseClaimTask = Task { [weak self] in
+            await joinTask?.value
+            guard !Task.isCancelled else { return }
+            let didClaim = await Task.detached(priority: .utility) { () -> Bool in
+                let entries = GameCatalogue.scan(root: gamesRoot, hotRoot: hotRoot)
+                let claimed = LooseRomfsClaimer.claimAll(
+                    documents: dataRoot.deletingLastPathComponent(),
+                    appDataRoot: dataRoot,
+                    entries: entries
+                )
+                return !claimed.isEmpty
+            }.value
+            guard let self, !Task.isCancelled, self.looseClaimGeneration == generation, !self.launchingGame else { return }
+            if didClaim {
+                self.reload(afterClaim: true)
+            }
+        }
     }
 
     private func lastPlayed(_ id: String) -> Date? { LastPlayedStore(defaults: config.defaults(id)).date }
@@ -430,10 +496,11 @@ public struct ShellHostConfig: Sendable {
         if data.source == .picked {
             pickedDataNotes.removeValue(forKey: entry.id)
         }
-        let shadersMissing = entry.frameworkURL.map { framework in
-            entry.manifest.map { EngineLaunchPlan.shadersMissing(framework: framework, chain: $0.chain, appFolder: appFolder(for: entry.id), dataFolder: data.url) } ?? false
-        } ?? false
-        var state = GameStateResolver.state(for: entry, data: data, environment: config.environment, shadersMissing: shadersMissing)
+        var state = GameStateResolver.state(for: entry, data: data, environment: config.environment)
+        let shadersSatisfied = ExternalShaders.isSatisfied(entry: entry, appFolder: appFolder(for: entry.id), dataURL: data.url)
+        if state == .playable && !shadersSatisfied {
+            state = .needsGameData
+        }
         if state == .needsGameData, let progress = joiningProgress[entry.id], progress.totalBytes > 0 {
             let clampedDone = min(max(0, progress.doneBytes), progress.totalBytes)
             let rawPercent = Int((Double(clampedDone) / Double(progress.totalBytes) * 100.0).rounded(.down))
@@ -448,7 +515,7 @@ public struct ShellHostConfig: Sendable {
                             recentlyPlayed: played.map { ShellFormat.played($0, now: config.now()) }, version: entry.manifest?.displayVersion ?? "",
                             isSwitch2: entry.manifest?.console == "switch2")
         guard let profile = profile(for: entry, data: data) else {
-            return GameDetail(game: tile, dataNote: dataNote(for: entry.id, data: data, found: false))
+            return GameDetail(game: tile, dataNote: dataNote(for: entry.id, data: data, found: false, shadersSatisfied: shadersSatisfied))
         }
         let store = GameSettingsStore(profile: profile, defaults: config.defaults(entry.id), shell: shellSettings.gameDefaults)
         var cloud: String?
@@ -473,7 +540,7 @@ public struct ShellHostConfig: Sendable {
         let padSections = profile.settings.contains { $0.env == "DM_PAD_MAP" } ? [] : [pad.section()]
         return GameDetail(
             game: tile, sections: sections + padSections,
-            dataSource: dataSource(data), dataNote: dataNote(for: entry.id, data: data, found: data.found),
+            dataSource: dataSource(data), dataNote: dataNote(for: entry.id, data: data, found: data.found, shadersSatisfied: shadersSatisfied),
             cloudSaves: cloud, cloudNote: cloudNote, dlc: dlc(data), hasModifiedSettings: store.hasModifiedSettings || !pad.entries.isEmpty,
             dataFromShell: data.source == .shell, cloudFromShell: cloudFromShell,
             cloudCanUseShell: shellFolder && !cloudFromShell,
@@ -489,13 +556,16 @@ public struct ShellHostConfig: Sendable {
         }
     }
 
-    private func dataNote(for id: String, data: DataResolution, found: Bool) -> String {
-        if found { return "" }
+    private func dataNote(for id: String, data: DataResolution, found: Bool, shadersSatisfied: Bool = true) -> String {
+        if found && shadersSatisfied { return "" }
         if let progress = joiningProgress[id], progress.totalBytes > 0 {
             let clampedDone = min(max(0, progress.doneBytes), progress.totalBytes)
             let doneSize = Self.formatByteSize(clampedDone)
             let totalSize = Self.formatByteSize(progress.totalBytes)
             return hostText("Joining .nxpart split files in this app's folder (\(doneSize) of \(totalSize)).")
+        }
+        if found && !shadersSatisfied {
+            return hostText("Shader files (msl) for this game are missing from its data folder. Send or copy the game data again from NX2Apple.")
         }
         if let customNote = pickedDataNotes[id], !customNote.isEmpty {
             return customNote
@@ -706,14 +776,28 @@ public struct ShellHostConfig: Sendable {
         if pendingCloudLaunch?.game.titleID == id {
             cancelCloudConflict()
         }
-        let failed = GameDeletion.delete(in: appFolder(for: id), saves: saves)
+        var failed = GameDeletion.delete(in: appFolder(for: id), saves: saves)
+        if let hotRoot = config.hotFrameworksRoot {
+            let entryParent = entry.directory.deletingLastPathComponent().standardizedFileURL
+            if entryParent == hotRoot.standardizedFileURL {
+                if !GameCatalogue.discardFolder(entry.directory, in: hotRoot) {
+                    failed.append(entry.directory)
+                }
+            }
+            let canonicalHot = hotRoot.appendingPathComponent("DmGame\(id.uppercased()).framework", isDirectory: true)
+            if FileManager.default.fileExists(atPath: canonicalHot.path),
+               !GameCatalogue.discardFolder(canonicalHot, in: hotRoot) {
+                failed.append(canonicalHot)
+            }
+        }
         dataStore(id).clear()
         cloudStore(id).clear()
         dataStores.removeValue(forKey: id)
         cloudStores.removeValue(forKey: id)
         let defaults = config.defaults(id)
         defaults.removeObject(forKey: LastPlayedStore.key)
-        defaults.set(GameDeletion.stamp(entry), forKey: GameDeletion.deletedKey)
+        let bundledAfterHotRemoval = GameCatalogue.scan(root: config.gamesRoot).first { $0.id.caseInsensitiveCompare(id) == .orderedSame }
+        defaults.set(GameDeletion.stamp(bundledAfterHotRemoval ?? entry), forKey: GameDeletion.deletedKey)
         reload()
         if !failed.isEmpty { notice = hostText("Some files of \(entry.title) could not be deleted.") }
     }
@@ -749,9 +833,11 @@ public struct ShellHostConfig: Sendable {
         defer { launchingGame = false }
         forgetCheckedRomfsImages()
         let resolved = await verifiedData(for: entry)
+        let gameAppFolder = appFolder(for: id)
         guard cloudCheckGeneration == checkGeneration,
-              self.entry(id)?.manifest == manifest, let dataURL = resolved.url,
-              let profile = profile(for: entry, data: resolved) else {
+              let latestEntry = self.entry(id), latestEntry.manifest == manifest, let dataURL = resolved.url,
+              ExternalShaders.isSatisfied(entry: latestEntry, appFolder: gameAppFolder, dataURL: dataURL),
+              let profile = profile(for: latestEntry, data: resolved) else {
             refresh(id)
             return
         }
@@ -760,7 +846,6 @@ public struct ShellHostConfig: Sendable {
         case .own(let url), .shell(let url): cloud = url
         case .off, .stale, .none: break
         }
-        let gameAppFolder = appFolder(for: id)
         var game = LaunchableGame(
             titleID: id, name: entry.title, manifest: manifest, directory: entry.directory, frameworkURL: framework, dataURL: dataURL,
             romfsURL: resolved.romfsURL, appFolder: gameAppFolder, environment: launchEnvironment(profile: profile, id: id), cloudSavesURL: cloud)
