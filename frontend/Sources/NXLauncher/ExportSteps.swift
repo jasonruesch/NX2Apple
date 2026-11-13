@@ -200,9 +200,8 @@ package struct ExportSteps: View {
 
     // MARK: To a drive or folder
 
-    /// The folder with its picker on one line, the copy buttons on the next: the path keeps the whole width it needs to read.
     private var driveRow: some View {
-        VStack(alignment: .trailing, spacing: ExportGrid.tight) {
+        HStack(spacing: ExportGrid.gap) {
             HStack(spacing: ExportGrid.tight) {
                 // The folder, drawn as a field: the same height and text inset as the device's dropdown in the other mode.
                 let none = devices.driveFolder.isEmpty
@@ -217,14 +216,10 @@ package struct ExportSteps: View {
                     .help(devices.driveFolder)
                 Button(loc.t("shell.driveChoose")) { build.chooseDriveFolder() }.buttonStyle(LauncherSecondaryButtonStyle()).fixedSize()
             }
-            HStack(spacing: ExportGrid.gap) {
-                if copying {
-                    action(loc.t("btn.stop"), accent: LauncherPalette.building) { build.stopDriveCopy() }
-                } else {
-                    action(loc.t("shell.driveCopy"), enabled: build.canCopyToDrive) { build.copyToDrive() }
-                    action(loc.t("shell.driveCopyAll"), enabled: build.canCopyAllToDrive) { build.copyAllToDrive() }
-                        .help(loc.t("shell.driveCopyAllNote"))
-                }
+            if copying {
+                action(loc.t("btn.stop"), accent: LauncherPalette.building) { build.stopDriveCopy() }
+            } else {
+                action(loc.t("shell.driveCopy"), enabled: build.canCopyToDrive) { build.copyToDrive() }
             }
         }
     }
@@ -252,7 +247,7 @@ package struct ExportSteps: View {
 
     @ViewBuilder private var driveStatus: some View {
         if case .copying(let done, let total) = build.send {
-            progress(String(format: loc.t("shell.driveProgress"), build.driveCopyName.isEmpty ? gameName : build.driveCopyName, ShellInstall.sizeText(done), ShellInstall.sizeText(total)), done: done, total: total)
+            progress(String(format: loc.t("shell.driveProgress"), gameName, ShellInstall.sizeText(done), ShellInstall.sizeText(total)), done: done, total: total)
         } else if case .copied(let folder) = build.send {
             note(.done, String(format: loc.t("shell.driveDone"), build.shortPath((folder as NSString).deletingLastPathComponent), gameDataRow))
         } else if case .failed(let text) = build.send {

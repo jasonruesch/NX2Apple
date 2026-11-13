@@ -2026,8 +2026,6 @@
   "shell.destinationUnavailableNext": "Xcode cannot use the selected iPhone or iPad. Connect and unlock it, check Xcode’s Devices and Simulators, then select it again under Install on.",
   "shell.driveChoose": "Choose folder",
   "shell.driveCopy": "Copy game data",
-  "shell.driveCopyAll": "Copy all game data",
-  "shell.driveCopyAllNote": "Copies every game with packed data to the folder, each into its own folder. Files already there at the same size are skipped.",
   "shell.driveDone": "Game data is in %@. Connect the drive to the iPhone and choose this folder in the app under %@. The drive has to stay connected while you play.",
   "shell.driveFailed": "The copy stopped: %@",
   "shell.driveFat32": "This drive is FAT32 and can’t hold files over 4 GB. Format it as exFAT or APFS, or choose another drive.",

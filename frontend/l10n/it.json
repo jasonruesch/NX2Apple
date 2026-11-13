@@ -2026,8 +2026,6 @@
   "shell.destinationUnavailableNext": "Xcode non può usare l’iPhone o l’iPad selezionato. Collegalo e sbloccalo, controlla Dispositivi e simulatori di Xcode, poi selezionalo di nuovo in Installa su.",
   "shell.driveChoose": "Scegli cartella",
   "shell.driveCopy": "Copia i dati di gioco",
-  "shell.driveCopyAll": "Copia tutti i dati",
-  "shell.driveCopyAllNote": "Copia nella cartella ogni gioco con dati impacchettati, ciascuno nella sua cartella. I file già presenti con la stessa dimensione vengono saltati.",
   "shell.driveDone": "I dati di gioco sono in %@. Collega il disco all’iPhone e scegli questa cartella nell’app in %@. Il disco deve restare collegato mentre giochi.",
   "shell.driveFailed": "La copia si è interrotta: %@",
   "shell.driveFat32": "Questo disco è FAT32 e non può contenere file oltre 4 GB. Formattalo in exFAT o APFS, oppure scegli un altro disco.",
