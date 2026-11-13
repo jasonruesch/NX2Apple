@@ -17,6 +17,7 @@ extension BuildStore {
             installer.exportBundleID = devices.ipaBundleIDValid ? devices.ipaBundleIDChoice : ""
             installer.exportAllShadersOut = devices.ipaShadersWithData && !devices.exportOneGame
         }
+        installer.dataFrameworkTeam = devices.ipaTeam
         installer.defaults = defaults
         installer.lang = localizer.lang
         installer.ownGroup = true
