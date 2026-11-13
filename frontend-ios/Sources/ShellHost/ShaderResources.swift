@@ -22,8 +22,6 @@ actor ShaderResources {
             let msl = folder.appendingPathComponent("msl", isDirectory: true)
             if (try? msl.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { return nil }
         }
-        // Shaders beside the game data are used as they are, so the bundled archive is not unpacked.
-        if EngineLaunchPlan.dataShaders(for: game, fileManager: fm) != nil { return nil }
 
         let files = try fm.contentsOfDirectory(at: game.frameworkURL, includingPropertiesForKeys: nil)
         let archives = files.filter { $0.pathExtension == "aar" && Self.hasUUIDName($0.deletingPathExtension().lastPathComponent, prefix: "msl-") }
