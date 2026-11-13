@@ -37,6 +37,7 @@ import XCTest
         var exportOneGame = false
         var driveFolder = ""
         var driveNamedFolders = false
+        var ipaShadersWithData = false
         var devices: [AppleDevice] = []
         var xcrun = "/usr/bin/true"
         var readTeams: @Sendable () -> [SigningTeam] = { [] }
@@ -70,6 +71,17 @@ import XCTest
     private func makeStore(targetChanged: @escaping () -> Void = {}) -> BuildStore {
         BuildStore(localizer: localizer, runner: FakeProcessRunner(), repo: repo, deps: deps, engine: engine, devices: devices,
                    defaults: defaults, targetChanged: targetChanged)
+    }
+
+    func testAllShadersWithGameDataIsForTheSharedAppsIPAOnly() {
+        let store = makeStore()
+        devices.exportIPA = true
+        XCTAssertFalse(store.makeInstaller().exportAllShadersOut)
+        devices.ipaShadersWithData = true
+        XCTAssertTrue(store.makeInstaller().exportAllShadersOut)
+        devices.exportOneGame = true
+        XCTAssertFalse(store.makeInstaller().exportAllShadersOut, "one game's own IPA holds its data and its shaders")
+        devices.exportOneGame = false; devices.ipaShadersWithData = false
     }
 
     private func file(_ name: String) throws -> String {

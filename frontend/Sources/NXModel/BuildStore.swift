@@ -40,6 +40,8 @@ package struct FilePick: Equatable {
     var ipaTeam: String { get }
     /// The bundle ID the player typed for the shared app's IPA, empty for the default.
     var ipaBundleID: String { get }
+    /// Every game's shaders go with its game data instead of the shared app's IPA.
+    var ipaShadersWithData: Bool { get }
     /// The folder the game data is copied to (a drive), empty when none is chosen.
     var driveFolder: String { get set }
     /// The drive copy names each game's folder `<game name> (<title ID>)` instead of the title ID.
@@ -61,6 +63,7 @@ extension InstallTarget {
     package func refreshDevices() async {}
     package var ipaTeam: String { "" }
     package var ipaBundleID: String { "" }
+    package var ipaShadersWithData: Bool { false }
     /// The IPA's bundle ID as the export uses it: trimmed, empty for the default.
     package var ipaBundleIDChoice: String { ipaBundleID.trimmingCharacters(in: .whitespacesAndNewlines) }
     /// The chosen bundle ID can be used (an empty one keeps the default).

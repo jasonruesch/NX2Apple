@@ -15,6 +15,7 @@ extension BuildStore {
         if devices.exportIPA {   // only the export reads them; an install keeps the device's team and shell.json's bundle ID
             installer.exportTeam = devices.ipaTeam
             installer.exportBundleID = devices.ipaBundleIDValid ? devices.ipaBundleIDChoice : ""
+            installer.exportAllShadersOut = devices.ipaShadersWithData && !devices.exportOneGame
         }
         installer.defaults = defaults
         installer.lang = localizer.lang
