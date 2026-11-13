@@ -430,10 +430,7 @@ public struct ShellHostConfig: Sendable {
         if data.source == .picked {
             pickedDataNotes.removeValue(forKey: entry.id)
         }
-        let shadersMissing = entry.frameworkURL.map { framework in
-            entry.manifest.map { EngineLaunchPlan.shadersMissing(framework: framework, chain: $0.chain, appFolder: appFolder(for: entry.id), dataFolder: data.url) } ?? false
-        } ?? false
-        var state = GameStateResolver.state(for: entry, data: data, environment: config.environment, shadersMissing: shadersMissing)
+        var state = GameStateResolver.state(for: entry, data: data, environment: config.environment)
         if state == .needsGameData, let progress = joiningProgress[entry.id], progress.totalBytes > 0 {
             let clampedDone = min(max(0, progress.doneBytes), progress.totalBytes)
             let rawPercent = Int((Double(clampedDone) / Double(progress.totalBytes) * 100.0).rounded(.down))

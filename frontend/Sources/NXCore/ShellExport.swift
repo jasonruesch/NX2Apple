@@ -293,11 +293,8 @@ extension ShellInstaller {
             try fm.copyItem(at: app, to: stagedApp)
             ShellExport.leaveOutOtherGames(in: stagedApp, library: library)
             let payload = stagedApp.deletingLastPathComponent()
-            if exportWithoutShaders {
-                packed = try ShellExport.stripShaders(in: stagedApp, frameworkNames: library.games.map { URL(fileURLWithPath: $0.framework).lastPathComponent })
-            }
             if try ShellExport.exceedsEntryLimit(in: payload, limit: entryLimit) {
-                packed += try packShaderLibraries(in: stagedApp, games: library.games, label: packName)
+                packed = try packShaderLibraries(in: stagedApp, games: library.games, label: packName)
                 if try ShellExport.exceedsEntryLimit(in: payload, limit: hardLimit) {
                     throw ShellExport.entryLimitExceededError(limit: hardLimit)
                 }
@@ -483,15 +480,6 @@ package enum ShellExport {
         for item in (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
         where item.hasPrefix("DmGame") && item.hasSuffix(".framework") && !keep.contains(item) {
             try? fm.removeItem(at: folder.appendingPathComponent(item))
-        }
-    }
-
-    /// Leaves the shaders of the named game frameworks out of the staged app (GameShaders.strip). Returns the frameworks it changed.
-    package static func stripShaders(in stagedApp: URL, frameworkNames: [String]) throws -> [URL] {
-        let frameworks = stagedApp.appendingPathComponent("Frameworks")
-        return try Set(frameworkNames).sorted().compactMap { name in
-            let framework = frameworks.appendingPathComponent(name)
-            return try GameShaders.strip(framework: framework) ? framework : nil
         }
     }
 

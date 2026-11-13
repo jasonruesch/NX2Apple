@@ -65,7 +65,6 @@ import ShellUI
     @Test func stateFollowsWhatIsPresent() {
         #expect(GameStateResolver.state(for: entry(Fixtures.orbit), data: found, environment: env) == .playable)
         #expect(GameStateResolver.state(for: entry(Fixtures.orbit), data: .missing, environment: env) == .needsGameData)
-        #expect(GameStateResolver.state(for: entry(Fixtures.orbit), data: found, environment: env, shadersMissing: true) == .needsGameData)
         #expect(GameStateResolver.state(for: entry(Fixtures.chain), data: found, environment: env) == .needsAppUpdate)
         #expect(GameStateResolver.state(for: entry(Fixtures.newerOS), data: found, environment: env) == .needsAppUpdate)
         // An app update comes before game data: the player cannot fix the data on an app that cannot run the game.

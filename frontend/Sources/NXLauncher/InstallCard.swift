@@ -103,12 +103,6 @@ package struct InstallCard: View {
                 .accessibilityLabel(loc.t("shared.ipaBundleID"))
         }
         CardDivider()
-        // The shaders are most of the IPA: left out, they go to the device with each game's data in step 3
-        CardRow(loc.t("shared.ipaShaders"), detail: loc.t(devices.ipaWithoutShaders ? "shared.ipaShadersOutNote" : "shared.ipaShadersInNote")) {
-            Toggle(loc.t("shared.ipaShaders"), isOn: $devices.ipaWithoutShaders)
-                .toggleStyle(LauncherSwitchStyle()).labelsHidden()
-        }
-        CardDivider()
         // A signed IPA is built for the device it goes to, so Xcode registers that device with the team before the export
         if !devices.ipaTeam.isEmpty {
             CardRow(loc.t("dev.target"), detail: devices.checked && devices.devices.isEmpty ? loc.t("dev.noDevices") : loc.t("shared.ipaDeviceNote")) {

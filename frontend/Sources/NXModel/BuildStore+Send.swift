@@ -151,14 +151,6 @@ extension BuildStore {
         return ShellLibrary.load(root: shellRoot).games.first { $0.titleID == titleID }?.name ?? packedGameName
     }
 
-    /// The shared app's framework of the game whose data is packed, when its `msl/` goes along with the game data (GameShaders): only
-    /// for a shared app's IPA that leaves the shaders out. Otherwise the IPA holds them and the copy leaves them out.
-    package var packedFramework: String? {
-        let titleID = packedTitleID
-        guard devices.ipaWithoutShaders, !devices.exportOneGame, !titleID.isEmpty else { return nil }
-        return ShellLibrary.load(root: shellRoot).games.first { $0.titleID == titleID }?.framework
-    }
-
     /// The folder panel, then what the folder's volume says about the game data.
     package func chooseDriveFolder() {
         guard let folder = chooseFolder() else { return }
@@ -170,7 +162,7 @@ extension BuildStore {
     package func refreshDrive() {
         let folder = devices.driveFolder
         guard !folder.isEmpty, !archivePath.isEmpty else { drive = nil; return }
-        let files = GameShaders.dataFiles(archive: archivePath, framework: packedFramework)
+        let files = ShellInstall.localFiles(in: archivePath)
         let have = DriveCopy.existingFiles(folder: folder, titleID: packedTitleID, name: driveGameName, named: devices.driveNamedFolders)
         let needed = DriveCopy.bytesToCopy(files: files, have: have)
         guard let volume = DriveCopy.volume(at: folder) else { drive = DriveState(volume: nil, needed: needed, problem: nil); return }
@@ -188,18 +180,16 @@ extension BuildStore {
         driveCancel.set(false)
         send = .copying(done: 0, total: drive?.needed ?? 0)
         let folder = devices.driveFolder, titleID = packedTitleID, archive = archivePath, cancel = driveCancel
-        let name = driveGameName, named = devices.driveNamedFolders, framework = packedFramework
+        let name = driveGameName, named = devices.driveNamedFolders
+        let files = ShellInstall.localFiles(in: archive)
         DispatchQueue.global(qos: .userInitiated).async {
             var destination = DriveCopy.destination(folder: folder, titleID: titleID, name: name, named: named)
             var failed: String?
             do {
-                if let framework { try GameShaders.place(framework: framework, in: archive) }
-                let files = GameShaders.dataFiles(archive: archive, framework: framework)
                 destination = try DriveCopy.prepareDestination(folder: folder, titleID: titleID, name: name, named: named)
                 try DriveCopy.copy(archive: archive, files: files, to: destination,
                                    progress: { done, total in hop { if case .copying = self.send { self.send = .copying(done: done, total: total) } } },
                                    cancelled: { cancel.value })
-                if framework != nil { GameShaders.removeOthers(in: destination, keeping: files) }
             } catch DriveCopy.CopyError.cancelled { failed = "" }
             catch { failed = error.localizedDescription }
             hop {

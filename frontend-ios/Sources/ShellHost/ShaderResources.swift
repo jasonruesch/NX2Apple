@@ -18,10 +18,12 @@ actor ShaderResources {
 
         // The launch plan already knows how to use an explicit setting, player shaders, or the loose framework tree.
         guard game.environment["DM_MSL_DIR"] == nil else { return nil }
-        let loose = game.frameworkURL.appendingPathComponent("msl", isDirectory: true)
-        if (try? loose.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { return nil }
-        // The game's own shaders (its app folder or beside its data) are used as they are, so the bundled archive is not unpacked.
-        if EngineLaunchPlan.ownShaders(for: game, fileManager: fm) != nil { return nil }
+        for folder in [game.appFolder, game.frameworkURL] {
+            let msl = folder.appendingPathComponent("msl", isDirectory: true)
+            if (try? msl.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { return nil }
+        }
+        // Shaders beside the game data are used as they are, so the bundled archive is not unpacked.
+        if EngineLaunchPlan.dataShaders(for: game, fileManager: fm) != nil { return nil }
 
         let files = try fm.contentsOfDirectory(at: game.frameworkURL, includingPropertiesForKeys: nil)
         let archives = files.filter { $0.pathExtension == "aar" && Self.hasUUIDName($0.deletingPathExtension().lastPathComponent, prefix: "msl-") }
