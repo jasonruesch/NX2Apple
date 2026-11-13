@@ -31,6 +31,7 @@ package enum SendWhere {
     nonisolated package static let driveNamedFoldersKey = "driveNamedFolders"
     nonisolated package static let ipaTeamKey = "ipaTeam"
     nonisolated package static let ipaBundleIDKey = "ipaBundleID"
+    nonisolated package static let ipaShadersWithDataKey = "ipaShadersWithData"
 
     @Published package var devices: [AppleDevice] = []
     @Published package var teams: [SigningTeam] = []
@@ -73,6 +74,10 @@ package enum SendWhere {
     @Published package var ipaBundleID: String {
         didSet { defaults.set(ipaBundleID, forKey: Self.ipaBundleIDKey) }
     }
+    /// Every game's shaders leave the shared app's IPA and go with its game data (step 3), not only the sets over 64 MB.
+    @Published package var ipaShadersWithData: Bool {
+        didSet { defaults.set(ipaShadersWithData, forKey: Self.ipaShadersWithDataKey) }
+    }
     /// The shared app's copy question: the size and the connection (nil: none is up).
     @Published package private(set) var shellCopy: ShellCopyPlan?
     /// Waiting for a cable before the game data goes over.
@@ -108,6 +113,7 @@ package enum SendWhere {
         self.driveNamedFolders = defaults.bool(forKey: Self.driveNamedFoldersKey)
         self.ipaTeam = defaults.string(forKey: Self.ipaTeamKey) ?? ""
         self.ipaBundleID = defaults.string(forKey: Self.ipaBundleIDKey) ?? ""
+        self.ipaShadersWithData = defaults.bool(forKey: Self.ipaShadersWithDataKey)
     }
 
     /// A device's name for a message, "iPhone" when this Mac has not listed it.

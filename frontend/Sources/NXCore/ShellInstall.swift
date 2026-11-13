@@ -345,6 +345,8 @@ package struct ShellInstaller {
     package var exportTeam = ""
     /// The export's bundle ID: empty keeps the one shell.json holds.
     package var exportBundleID = ""
+    /// Every game's shaders leave the shared IPA and go with its game data, not only the sets over `externalMSLThreshold`.
+    package var exportAllShadersOut = false
     /// The codesign the team-signed export runs (a test points it at a stand-in).
     package var codesign = "/usr/bin/codesign"
     package var signingIdentity: (String, ProcessRunner) -> String? = ShellHotInstall.defaultSigningIdentity

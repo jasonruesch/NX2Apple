@@ -282,12 +282,14 @@ extension ShellInstaller {
             return Outcome(ok: false, message: fmt("dev.noProject", app))
         }
         end(Self.exportBuildStageID, buildName, ok: true)
-        return packExport(app: URL(fileURLWithPath: app), library: library, notes: prepared.notes, bundleID: bundleID, teamSigned: signed)
+        return packExport(app: URL(fileURLWithPath: app), library: library, notes: prepared.notes, bundleID: bundleID, teamSigned: signed,
+                          externalMSLThreshold: exportAllShadersOut ? 0 : ShellExport.externalMSLThreshold)
     }
 
     /// Stage and zip Payload/<app>.app. Signing can add _CodeSignature/ and CodeResources, so reserve two ZIP32 entries.
     /// `teamSigned`: Xcode signed `app` for a team, and the staged copy is signed again with the same identity and entitlements.
-    /// Large shader libraries move out of an unsigned IPA only: a team-signed one keeps its frameworks as signed.
+    /// Shader libraries over `externalMSLThreshold` move out of the IPA (0 moves every game's out). In a team-signed IPA the frameworks
+    /// that lost their shaders are signed again with the app.
     func packExport(app: URL, library: ShellLibrary, notes: [String] = [], bundleID: String? = nil, teamSigned: Bool = false,
                     entryLimit: Int = ShellExport.entryLimit, hardLimit: Int = ShellExport.entryLimit,
                     externalMSLThreshold: Int64 = ShellExport.externalMSLThreshold) -> Outcome {
@@ -305,15 +307,17 @@ extension ShellInstaller {
             try fm.copyItem(at: app, to: stagedApp)
             ShellExport.leaveOutOtherGames(in: stagedApp, library: library)
             let names = library.games.map { URL(fileURLWithPath: $0.framework).lastPathComponent }
-            externalizedTitles = teamSigned ? [] : try ShellExport.externalizeLargeShaderLibraries(
+            externalizedTitles = try ShellExport.externalizeLargeShaderLibraries(
                 in: stagedApp,
                 frameworkNames: names,
                 threshold: externalMSLThreshold,
                 fm: fm
             )
+            packed = Set(names).sorted().filter { externalizedTitles.contains(ShellInstall.titleID(ofFramework: $0).uppercased()) }
+                .map { stagedApp.appendingPathComponent("Frameworks", isDirectory: true).appendingPathComponent($0, isDirectory: true) }
             let payload = stagedApp.deletingLastPathComponent()
             if try ShellExport.exceedsEntryLimit(in: payload, limit: entryLimit) {
-                packed = try packShaderLibraries(in: stagedApp, games: library.games, label: packName)
+                packed += try packShaderLibraries(in: stagedApp, games: library.games, label: packName)
                 if try ShellExport.exceedsEntryLimit(in: payload, limit: hardLimit) {
                     throw ShellExport.entryLimitExceededError(limit: hardLimit)
                 }

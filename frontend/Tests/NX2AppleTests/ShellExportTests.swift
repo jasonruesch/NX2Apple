@@ -1263,6 +1263,40 @@ import NXModel
         XCTAssertTrue(signs[1].hasSuffix("/Payload/DmShell.app") && signs[1].contains("--entitlements"), signs[1])
     }
 
+    func testASignedExportMovesLargeShadersOutAndSignsTheFrameworksItChanged() throws {
+        let f = try makeFixture(entitlements: false)
+        let fw = "DmGame\(titleID).framework"
+        try write(ShellInstall.exportAppPath(root: f.root) + "/Frameworks/\(fw)/msl/b-test.img", String(repeating: "s", count: 256))
+        var i = try signedInstaller(f)
+        i.exportTeam = "ABCDE12345"
+        let library = ShellLibrary(games: [ShellLibrary.Game(titleID: titleID, name: "Test Game", framework: fw)])
+        let outcome = i.packExport(app: URL(fileURLWithPath: ShellInstall.exportAppPath(root: f.root)), library: library, teamSigned: true,
+                                   externalMSLThreshold: 64)
+        XCTAssertTrue(outcome.ok, outcome.message)
+        let names = try entries(ofZip: outcome.ipaPath)
+        XCTAssertFalse(names.contains { $0.contains("/msl/") }, names.joined(separator: "\n"))
+        XCTAssertTrue(names.contains("Payload/DmShell.app/Frameworks/\(fw)/" + ShellExport.externalMSLMarker))
+        let signs = codesignCalls.filter { $0.hasPrefix("--force") }
+        XCTAssertEqual(signs.count, 2, signs.joined(separator: "\n"))
+        XCTAssertTrue(signs[0].hasSuffix("/Payload/DmShell.app/Frameworks/\(fw)"), "the framework that changed is signed again first")
+        XCTAssertTrue(signs[1].hasSuffix("/Payload/DmShell.app"))
+    }
+
+    func testAllShadersWithGameDataMovesEveryGamesShadersOut() throws {
+        let f = try makeFixture(entitlements: false)
+        let shader = "Frameworks/DmGame\(titleID).framework/msl/b-test.img"
+        try write(ShellInstall.exportAppPath(root: f.root) + "/" + shader, "a small library")
+        let kept = installer(f).export(framework: f.framework, titleID: titleID, name: "Test Game")
+        XCTAssertTrue(kept.ok, kept.message)
+        XCTAssertTrue(try entries(ofZip: kept.ipaPath).contains("Payload/DmShell.app/" + shader), "under 64 MB it stays by default")
+        try write(ShellInstall.exportAppPath(root: f.root) + "/" + shader, "a small library")   // the export cleaned the products
+        var i = installer(f)
+        i.exportAllShadersOut = true
+        let out = i.export(framework: f.framework, titleID: titleID, name: "Test Game")
+        XCTAssertTrue(out.ok, out.message)
+        XCTAssertFalse(try entries(ofZip: out.ipaPath).contains { $0.contains("/msl/") })
+    }
+
     func testASignedExportThatCannotSignStopsWithoutAnIPA() throws {
         let f = try makeFixture()
         try write(state + "/sign-fails", "")
