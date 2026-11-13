@@ -92,6 +92,10 @@ import NXModel
         try write(archive + "/aoc/1.img", "abcd")
         let drive = path("drive")
         try write(drive + "/" + titleID + "/romfs.img", "0123456789")   // a copy from before, under the title ID
+        // A shared app library of its own, not this Mac's (whose shaders would go too), that names the game
+        testDefaults.set(path("shell"), forKey: "shellRoot")
+        try ShellLibrary(games: [.init(titleID: titleID, name: "Metroid Dread", framework: path("shell/frameworks/DmGame\(titleID).framework"))])
+            .save(root: path("shell"))
         let stores = LauncherStores(defaults: testDefaults); let model = stores.build
         model.archivePath = archive
         model.exportedIPAPath = path("export/NX2Apple.ipa")
