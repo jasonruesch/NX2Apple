@@ -37,6 +37,10 @@ package struct BuildQueueCard: View {
                     if queue.queued.isEmpty { queue.cancelQueued() } else { confirmingCancel = true }
                 }
                 .buttonStyle(LauncherSecondaryButtonStyle()).disabled(queue.queued.isEmpty)
+                if queue.hasFinished {
+                    Button(loc.t("queue.clear")) { queue.clearFinished() }
+                        .buttonStyle(LauncherSecondaryButtonStyle())
+                }
                 Spacer(minLength: 8)
                 if queue.paused {
                     Button { queue.resume() } label: {
@@ -78,9 +82,15 @@ package struct BuildQueueCard: View {
                 }
                 .buttonStyle(LauncherSecondaryButtonStyle())
             } else if entry.finished {   // a result the player is done with: built, failed or stopped
-                Button(loc.t("queue.remove")) { queue.remove(entry.id) }
-                    .accessibilityLabel(String(format: loc.t("queue.removeNamed"), entry.name))
-                    .buttonStyle(LauncherSecondaryButtonStyle())
+                HStack(spacing: 8) {
+                    if entry.status != .done {
+                        Button(loc.t("queue.retry")) { queue.retry(entry.id) }
+                            .accessibilityLabel(String(format: loc.t("queue.retryNamed"), entry.name))
+                    }
+                    Button(loc.t("queue.remove")) { queue.remove(entry.id) }
+                        .accessibilityLabel(String(format: loc.t("queue.removeNamed"), entry.name))
+                }
+                .buttonStyle(LauncherSecondaryButtonStyle())
             }
         }
         .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
@@ -93,7 +103,7 @@ package struct BuildQueueCard: View {
         case .done: return LauncherPalette.ready
         case .running: return LauncherPalette.building
         case .failed: return .red
-        case .queued, .skipped: return .secondary
+        case .queued, .skipped, .stopped: return .secondary
         }
     }
 }

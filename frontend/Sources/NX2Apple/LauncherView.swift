@@ -35,6 +35,8 @@ struct LauncherView: View {
     @State var launchError: String?
     @State private var removing: LibraryGame?
     @State private var selectingGames = false   // the Build selected games sheet (BuildSelectedSheet.swift)
+    @State var batchRefreshOpen = false
+    @State var missingImgGuideFor: MissingImgGuideContext?
     @State private var deleting: LibraryGame?   // the game whose Delete sheet is open (DeleteGameSheet.swift)
     @State var supportedGames: [SupportedGame]?   // the Supported games sheet is open when this is set (SupportedGamesSheet.swift)
     @State var skippedItemsOpen = false
@@ -246,14 +248,9 @@ struct LauncherView: View {
             }
             refreshArtwork()
             readSignatures()
-            m.sharedAppDataSources = { [library, devices = stores.deviceStore] in   // the games with packed data, for Send all game data (#1036)
-                // A game whose packed data left this Mac for the drive folder sends and copies from there (DriveDataSource)
-                library.games.compactMap { game in
-                    let local = !game.archivePath.isEmpty && FileManager.default.fileExists(atPath: game.archivePath)
-                    let archive = local ? game.archivePath
-                        : DriveDataSource.folder(in: devices.driveFolder, titleID: game.titleID, named: devices.driveNamedFolders)
-                    return archive.map { TransferSource(titleID: game.titleID, name: game.name, archive: $0) }
-                }
+            m.sharedAppDataSources = { [library] in   // the games with packed data, for Send all game data (#1036)
+                library.games.filter { !$0.archivePath.isEmpty && FileManager.default.fileExists(atPath: $0.archivePath) }
+                    .map { TransferSource(titleID: $0.titleID, name: $0.name, archive: $0.archivePath) }
             }
             m.macFallbackIconArguments = { [library] titleID in   // the engine takes it only for a game without an icon of its own (#784)
                 let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("NX2Apple/fallback-icons", isDirectory: true)
@@ -356,6 +353,7 @@ struct LauncherView: View {
             BuildSelectedSheet(library: library, queue: stores.queue, engineID: engine.selection.engineID, target: m.target, packagesSharedApp: !m.exportsOneGame) { selectingGames = false }
                 .environmentObject(loc)
         }
+        .refreshSheetsWiring(batchOpen: $batchRefreshOpen, imgGuide: $missingImgGuideFor, stores: stores, library: library, toolsAge: toolsAge, page: $page, pad: padFocus, scope: { currentPadScope })
         .sheet(isPresented: Binding(get: { supportedGames != nil }, set: { if !$0 { supportedGames = nil } })) {
             SupportedGamesSheet(games: supportedGames ?? [], owned: { id in library.games.first { $0.titleID.uppercased() == id } },
                                 covers: .live(store: artworkStore, directory: library.artworkDirectory, language: loc.lang.code, maxPixel: SupportedGamesSheet.coverPixels),
@@ -677,7 +675,7 @@ struct LauncherView: View {
             }
             return
         }
-        let sheetOpen = controllerSheet || supportedGames != nil || skippedItemsOpen || optionsFor != nil || controlsOpen || savesFor != nil || cheatsFor != nil || freeSpaceFor != nil || stores.buildFiles.confirming != nil || deleting != nil || renaming != nil || artworkEditor != nil || cloudGate.isActive
+        let sheetOpen = controllerSheet || batchRefreshOpen || missingImgGuideFor != nil || supportedGames != nil || skippedItemsOpen || optionsFor != nil || controlsOpen || savesFor != nil || cheatsFor != nil || freeSpaceFor != nil || stores.buildFiles.confirming != nil || deleting != nil || renaming != nil || artworkEditor != nil || cloudGate.isActive
         switch ManagePad.route(action, menuOpen: manageOpenFor != nil, sheetOpen: sheetOpen, hasGame: library.selected != nil && page == .library) {
         case .close: manageOpenFor = nil; return
         case .swallow: return
@@ -704,7 +702,7 @@ struct LauncherView: View {
         }
         if renaming != nil && [.b, .x, .l, .r].contains(action) { if action == .b { renaming = nil }; return }
         if action == .b {
-            if optionsFor != nil { optionsFor = nil } else if controlsOpen { controlsCancelRequest += 1 }
+            if batchRefreshOpen { batchRefreshOpen = false } else if missingImgGuideFor != nil { missingImgGuideFor = nil } else if optionsFor != nil { optionsFor = nil } else if controlsOpen { controlsCancelRequest += 1 }
             else if searching { searching = false; search = "" } else if page != .library { page = .library }
             return
         }
@@ -758,7 +756,7 @@ struct LauncherView: View {
 
     /// The scope a controller acts in when no menu is open: the innermost sheet, else the window.
     private var currentPadScope: String {
-        cloudGate.isActive ? "cloudsave" : controllerSheet ? "console.controllers" : controllerMappingOpen ? "controls" : artworkEditor != nil ? "artwork" : savesFor != nil ? "saves" : cheatsFor != nil ? "cheats" : freeSpaceFor != nil ? "free" : stores.buildFiles.confirming != nil ? "buildfiles" : deleting != nil ? "delete" : skippedItemsOpen ? "skipped" : supportedGames != nil ? "supported" : renaming != nil ? "rename" : optionsFor != nil ? "launch" : controlsOpen ? "controls" : "main"
+        cloudGate.isActive ? "cloudsave" : controllerSheet ? "console.controllers" : controllerMappingOpen ? "controls" : batchRefreshOpen ? "batchRefresh" : missingImgGuideFor != nil ? "imgGuide" : artworkEditor != nil ? "artwork" : savesFor != nil ? "saves" : cheatsFor != nil ? "cheats" : freeSpaceFor != nil ? "free" : stores.buildFiles.confirming != nil ? "buildfiles" : deleting != nil ? "delete" : skippedItemsOpen ? "skipped" : supportedGames != nil ? "supported" : renaming != nil ? "rename" : optionsFor != nil ? "launch" : controlsOpen ? "controls" : "main"
     }
 
     /// The space the collection row keeps around its cards for the focus ring (PadFocus draws it 4 pt outside a target).

@@ -5,6 +5,9 @@ import ShellUI
 #if canImport(UIKit)
 import UIKit
 #endif
+#if os(iOS)
+import GameController
+#endif
 
 /// Where the host finds things. Everything the model touches outside itself is here, so tests point it at a temporary folder.
 public struct ShellHostConfig: Sendable {
@@ -160,7 +163,7 @@ public struct ShellHostConfig: Sendable {
                 let documents = dataRoot.deletingLastPathComponent()
                 DataParts.writeFeatures(documents: documents)
                 let joined = DataParts.joinAll(appDataRoot: dataRoot, partSize: partSize, onProgress: reportProgress)
-                let allEntries = GameCatalogue.scan(root: gamesRoot, hotRoot: hotRoot)
+                let allEntries = GameCatalogue.scan(root: gamesRoot, hotRoot: hotRoot, gameDataRoot: dataRoot)
                 let claimed = LooseRomfsClaimer.claimAll(documents: documents, appDataRoot: dataRoot, entries: allEntries)
                 BackupExclusion.apply(appDataRoot: dataRoot)
                 return !joined.isEmpty || !claimed.isEmpty
@@ -294,9 +297,11 @@ public struct ShellHostConfig: Sendable {
         shellScan = Task { [weak self] in
             let found = await Task.detached(priority: .utility) { () -> [String: URL] in
                 let index = ShellDataIndex(folder: folder)
-                var found: [String: URL] = [:]
-                for (titleID, identity) in wanted where !Task.isCancelled { if let dir = index.folder(matching: identity) { found[titleID] = dir } }
-                return found
+                var matches: [String: URL] = [:]
+                for (titleID, identity) in wanted where !Task.isCancelled {
+                    if let url = index.imageURL(matching: identity) { matches[titleID] = url }
+                }
+                return matches
             }.value
             guard let self, !Task.isCancelled, self.scannedShellFolder == folder.path else { return }
             self.shellScan = nil
@@ -329,7 +334,10 @@ public struct ShellHostConfig: Sendable {
 
     private func reload(afterClaim: Bool) {
         forgetCheckedRomfsImages()
-        let scanned = GameCatalogue.scan(root: config.gamesRoot, hotRoot: config.hotFrameworksRoot).filter { !isDeleted($0) }
+        if let hotRoot = config.hotFrameworksRoot {
+            GameCatalogue.promoteStagedFrameworks(in: hotRoot, gameDataRoot: config.appDataRoot)
+        }
+        let scanned = GameCatalogue.scan(root: config.gamesRoot, hotRoot: config.hotFrameworksRoot, gameDataRoot: config.appDataRoot).filter { !isDeleted($0) }
         let built = scanned.map(detail(for:))
         let order = LibraryOrder.ids(of: built.map(\.game), lastPlayed: Dictionary(uniqueKeysWithValues: scanned.compactMap { e in
             lastPlayed(e.id).map { (e.id, $0) } }))
@@ -355,7 +363,7 @@ public struct ShellHostConfig: Sendable {
             await joinTask?.value
             guard !Task.isCancelled else { return }
             let didClaim = await Task.detached(priority: .utility) { () -> Bool in
-                let entries = GameCatalogue.scan(root: gamesRoot, hotRoot: hotRoot)
+                let entries = GameCatalogue.scan(root: gamesRoot, hotRoot: hotRoot, gameDataRoot: dataRoot)
                 let claimed = LooseRomfsClaimer.claimAll(
                     documents: dataRoot.deletingLastPathComponent(),
                     appDataRoot: dataRoot,
@@ -497,11 +505,18 @@ public struct ShellHostConfig: Sendable {
             pickedDataNotes.removeValue(forKey: entry.id)
         }
         var state = GameStateResolver.state(for: entry, data: data, environment: config.environment)
-        let shadersSatisfied = ExternalShaders.isSatisfied(entry: entry, appFolder: appFolder(for: entry.id), dataURL: data.url)
-        if state == .playable && !shadersSatisfied {
-            state = .needsGameData
+        let readiness = ShaderResources.readiness(entry: entry, appFolder: appFolder(for: entry.id), dataURL: data.url, romfsURL: data.romfsURL)
+        if data.found && state == .playable {
+            switch readiness {
+            case .ready:
+                break
+            case .staleTrailer:
+                state = .needsDataUpdate(staleChain: true)
+            case .missing:
+                state = .needsDataUpdate(staleChain: false)
+            }
         }
-        if state == .needsGameData, let progress = joiningProgress[entry.id], progress.totalBytes > 0 {
+        if Self.isMissingOrNeedsUpdate(state), let progress = joiningProgress[entry.id], progress.totalBytes > 0 {
             let clampedDone = min(max(0, progress.doneBytes), progress.totalBytes)
             let rawPercent = Int((Double(clampedDone) / Double(progress.totalBytes) * 100.0).rounded(.down))
             let percent = min(99, max(0, rawPercent))
@@ -515,7 +530,7 @@ public struct ShellHostConfig: Sendable {
                             recentlyPlayed: played.map { ShellFormat.played($0, now: config.now()) }, version: entry.manifest?.displayVersion ?? "",
                             isSwitch2: entry.manifest?.console == "switch2")
         guard let profile = profile(for: entry, data: data) else {
-            return GameDetail(game: tile, dataNote: dataNote(for: entry.id, data: data, found: false, shadersSatisfied: shadersSatisfied))
+            return GameDetail(game: tile, dataNote: dataNote(for: entry.id, data: data, found: false, readiness: readiness))
         }
         let store = GameSettingsStore(profile: profile, defaults: config.defaults(entry.id), shell: shellSettings.gameDefaults)
         var cloud: String?
@@ -540,7 +555,7 @@ public struct ShellHostConfig: Sendable {
         let padSections = profile.settings.contains { $0.env == "DM_PAD_MAP" } ? [] : [pad.section()]
         return GameDetail(
             game: tile, sections: sections + padSections,
-            dataSource: dataSource(data), dataNote: dataNote(for: entry.id, data: data, found: data.found, shadersSatisfied: shadersSatisfied),
+            dataSource: dataSource(data), dataNote: dataNote(for: entry.id, data: data, found: data.found, readiness: readiness),
             cloudSaves: cloud, cloudNote: cloudNote, dlc: dlc(data), hasModifiedSettings: store.hasModifiedSettings || !pad.entries.isEmpty,
             dataFromShell: data.source == .shell, cloudFromShell: cloudFromShell,
             cloudCanUseShell: shellFolder && !cloudFromShell,
@@ -556,16 +571,36 @@ public struct ShellHostConfig: Sendable {
         }
     }
 
-    private func dataNote(for id: String, data: DataResolution, found: Bool, shadersSatisfied: Bool = true) -> String {
-        if found && shadersSatisfied { return "" }
+    private func dataNote(for id: String, data: DataResolution, found: Bool, readiness: ShaderReadiness) -> String {
+        if found {
+            switch readiness {
+            case .ready:
+                return ""
+            case .staleTrailer(let imgChain, let expChain):
+                if !imgChain.isEmpty && !expChain.isEmpty {
+                    return hostText("Shader files in this game data (\(imgChain)) do not match this app's version (\(expChain)). Send or copy updated game data from NX2Apple.")
+                } else {
+                    return hostText("Shader files in this game data do not match this app's version. Send or copy updated game data from NX2Apple.")
+                }
+            case .missing(let hadUnjoinedParts):
+                if let progress = joiningProgress[id], progress.totalBytes > 0 {
+                    let clampedDone = min(max(0, progress.doneBytes), progress.totalBytes)
+                    let doneSize = Self.formatByteSize(clampedDone)
+                    let totalSize = Self.formatByteSize(progress.totalBytes)
+                    return hostText("Joining .nxpart split files in this app's folder (\(doneSize) of \(totalSize)).")
+                }
+                if hadUnjoinedParts {
+                    return hostText("Shader files (msl) for this game are incomplete or still transferring. Wait for transfer to complete or send the game data again from NX2Apple.")
+                } else {
+                    return hostText("Shader files (msl) for this game are missing from its data folder. Send or copy the game data again from NX2Apple.")
+                }
+            }
+        }
         if let progress = joiningProgress[id], progress.totalBytes > 0 {
             let clampedDone = min(max(0, progress.doneBytes), progress.totalBytes)
             let doneSize = Self.formatByteSize(clampedDone)
             let totalSize = Self.formatByteSize(progress.totalBytes)
             return hostText("Joining .nxpart split files in this app's folder (\(doneSize) of \(totalSize)).")
-        }
-        if found && !shadersSatisfied {
-            return hostText("Shader files (msl) for this game are missing from its data folder. Send or copy the game data again from NX2Apple.")
         }
         if let customNote = pickedDataNotes[id], !customNote.isEmpty {
             return customNote
@@ -574,6 +609,13 @@ public struct ShellHostConfig: Sendable {
             return hostText("The location you picked before is no longer readable (the app was signed differently). Please choose it again.")
         }
         return hostText("Choose the folder holding romfs.img (or the game's title ID folder) on this device, an external drive, or iCloud Drive.")
+    }
+
+    private static func isMissingOrNeedsUpdate(_ state: GameState) -> Bool {
+        switch state {
+        case .needsGameData, .needsDataUpdate: true
+        default: false
+        }
     }
 
     private func dlc(_ data: DataResolution) -> String {
@@ -615,7 +657,8 @@ public struct ShellHostConfig: Sendable {
             onButtonTest: { [weak self] open in self?.buttonTest(open) },
             onPadMergeChange: { [weak self] on in self?.setPadMerge(on) },
             onRestoreSaveBackup: { [weak self] id in self?.restoreLatestSaveBackup(id) },
-            onDeleteGame: { [weak self] id, saves in self?.deleteGame(id, saves: saves) })
+            onDeleteGame: { [weak self] id, saves in self?.deleteGame(id, saves: saves) },
+            onOpenHomeButtonSettings: { [weak self] in self?.openHomeButtonSettings() })
     }
 
     public func change(_ id: String, setting: String, value: String) {
@@ -682,7 +725,7 @@ public struct ShellHostConfig: Sendable {
                     refresh(id)
                 }
                 notice = message
-            } else if let game = details.first(where: { $0.id == id })?.game, game.state == .needsGameData {
+            } else if let game = details.first(where: { $0.id == id })?.game, Self.isMissingOrNeedsUpdate(game.state) {
                 notice = hostText("No game data for \(game.title) was found in that folder.")
             }
         }
@@ -693,7 +736,7 @@ public struct ShellHostConfig: Sendable {
         pickedDataNotes.removeValue(forKey: id)
         dataStore(id).clear()
         refresh(id)
-        if details.first(where: { $0.id == id })?.game.state == .needsGameData {
+        if let game = details.first(where: { $0.id == id })?.game, Self.isMissingOrNeedsUpdate(game.state) {
             notice = hostText("This app's folder has no data for this game yet. Copy it to games/\(id) in this app's folder in Files.")
         }
     }
@@ -835,8 +878,12 @@ public struct ShellHostConfig: Sendable {
         let resolved = await verifiedData(for: entry)
         let gameAppFolder = appFolder(for: id)
         guard cloudCheckGeneration == checkGeneration,
-              let latestEntry = self.entry(id), latestEntry.manifest == manifest, let dataURL = resolved.url,
-              ExternalShaders.isSatisfied(entry: latestEntry, appFolder: gameAppFolder, dataURL: dataURL),
+              let latestEntry = self.entry(id), latestEntry.manifest == manifest, let dataURL = resolved.url else {
+            refresh(id)
+            return
+        }
+        let readiness = ShaderResources.readiness(entry: latestEntry, appFolder: gameAppFolder, dataURL: dataURL, romfsURL: resolved.romfsURL)
+        guard case .ready(let shaderSource) = readiness,
               let profile = profile(for: latestEntry, data: resolved) else {
             refresh(id)
             return
@@ -848,7 +895,13 @@ public struct ShellHostConfig: Sendable {
         }
         var game = LaunchableGame(
             titleID: id, name: entry.title, manifest: manifest, directory: entry.directory, frameworkURL: framework, dataURL: dataURL,
-            romfsURL: resolved.romfsURL, appFolder: gameAppFolder, environment: launchEnvironment(profile: profile, id: id), cloudSavesURL: cloud)
+            romfsURL: resolved.romfsURL, appFolder: gameAppFolder, environment: launchEnvironment(profile: profile, id: id),
+            cloudSavesURL: cloud, shellEnvironment: shellSettings.gameDefaults,
+            shellFallbackKeys: launchShellFallbackKeys(profile: profile, id: id),
+            fallbackBundledFrameworkURL: latestEntry.fallbackBundledFrameworkURL)
+        if case .trailer = shaderSource {
+            game.usesEmbeddedShaderTrailer = true
+        }
 
         if let cloudFolder = cloud {
             let report = await Task.detached(priority: .userInitiated) {
@@ -1001,6 +1054,9 @@ public struct ShellHostConfig: Sendable {
     /// The right-stick hint's words: a few, no semicolon, short enough for the right third of a small phone.
     static var touchHint: String { hostText("Right stick: drag here") }
 
+    /// Shown once below the gear button when a physical controller is connected, fading with the button.
+    static var padQuitHint: String { hostText("Hold {-} and {+} to quit") }
+
     /// DM_HOME_QUIT_TEXT: the game's quit prompt in the player's language, one text per line in the engine's order (home_quit.h): the hold
     /// indicator, the title with the game's name, the note, Quit and Cancel. The engine draws it when Quit is picked in the in-game menu (the gear)
     /// or Home is held. The menu item reads the title without its question mark.
@@ -1024,6 +1080,8 @@ public struct ShellHostConfig: Sendable {
         for (key, value) in shellSettings.gameDefaults where env[key] == nil { env[key] = value }
         // The words the engine shows once per launch where the 3D layout's undrawn right stick is (patch 0067), in the player's language.
         env["DM_TOUCH_HINT"] = Self.touchHint
+        // Shown once below the gear button while a physical controller is connected, in the player's language.
+        env["DM_PAD_QUIT_HINT"] = Self.padQuitHint
         // The quit prompt's words (patch 0068), as the Mac launcher passes them for its Home button prompt.
         env["DM_HOME_QUIT_TEXT"] = Self.quitPromptText(gameName: entry(id)?.title ?? id)
         // The in-game menu's own words (patch 0124), as the Mac's build bakes them into a game's own app.
@@ -1034,6 +1092,16 @@ public struct ShellHostConfig: Sendable {
                                             game: GamePadMapStore(defaults: config.defaults(id)).entries).envValue
         }
         return env
+    }
+
+    func launchShellFallbackKeys(profile: LauncherProfile, id: String) -> Set<String> {
+        let store = GameSettingsStore(profile: profile, defaults: config.defaults(id), shell: shellSettings.gameDefaults)
+        var keys = Set(profile.settings.filter { store.isFromShell($0) }.map(\.env))
+        let profileEnvs = Set(profile.settings.map(\.env))
+        for key in shellSettings.gameDefaults.keys where !profileEnvs.contains(key) {
+            keys.insert(key)
+        }
+        return keys
     }
 
     // MARK: Controllers
@@ -1053,6 +1121,32 @@ public struct ShellHostConfig: Sendable {
     }
 
     public func stopControllers() { adapter.stop() }
+
+    /// True on iOS 27+ when a controller is connected and Home Button Override has not yet been deferred to the app.
+    public var canOpenHomeButtonSettings: Bool {
+        #if os(iOS)
+        if #available(iOS 27.0, *), !controllers.isEmpty,
+           let status = try? GCControllerHomeButtonSettingsManager().controllerHomeButtonInAppAction {
+            return status.action != .defer && status.action != .unavailable
+        }
+        #endif
+        return false
+    }
+
+    /// Opens the system Game Controller Home Button Override screen (or falls back to app settings).
+    public func openHomeButtonSettings() {
+        #if os(iOS)
+        if #available(iOS 27.0, *) {
+            do {
+                try GCControllerHomeButtonSettingsManager().openControllerHomeButtonSettings(for: .customizeInAppAction)
+                return
+            } catch {}
+        }
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            config.openURL(url)
+        }
+        #endif
+    }
 
     /// The button test opened or closed: the adapter reports every controller state in between.
     public func buttonTest(_ open: Bool) {

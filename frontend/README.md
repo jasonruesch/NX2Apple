@@ -169,7 +169,7 @@ library manifest is stored at
 ## Launch options
 
 The button beside **Play** opens the game's launch options: the settings the iPhone
-launcher shows before a game starts ([docs/settings.md](https://github.com/seedds/nxnative/blob/0c078130f6db7d0d32c1dc28146feaf97713f008/docs/settings.md)), read
+launcher shows before a game starts ([docs/settings.md](https://github.com/seedds/nxnative/blob/5a4e23a2e952dae92e1ccf0e6b7bf24e3266d4e8/docs/settings.md)), read
 from the list the engine packs into the Mac app (`Contents/Resources/dm/launcher.json`,
 written by `dm/games/settings.py` from `dm/games/settings.tsv`, and the engine change that
 packs it is [seedds/nxnative#352](https://github.com/seedds/nxnative/pull/352), so a
@@ -442,6 +442,14 @@ lookup shows the English text, then the key, and one line goes to standard error
 ```bash
 swift test --package-path frontend
 ```
+
+To skip the multi-minute UI width and interaction-budget suites on routine local pushes, `pre-push` runs:
+
+```bash
+swift test --package-path frontend --skip 'LauncherControlWidthTests|LauncherPerformanceTests'
+```
+
+Run `swift test --package-path frontend --filter LauncherControlWidthTests` whenever a change touches UI layout, control sizing or localized button widths, and CI still runs the full `swift test` suite on every pull request.
 
 The Swift tests cover bundle validation, persistent metadata, folder discovery,
 source-file preservation, and automatic registration through a synthetic build
