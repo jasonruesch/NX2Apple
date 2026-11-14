@@ -260,8 +260,6 @@ extension BuildStore {
     private func copySourcesToDrive(_ sources: [TransferSource], singleGame: Bool) {
         guard let first = sources.first else { return }
         let folder = devices.driveFolder, root = shellRoot, cancel = driveCancel, named = devices.driveNamedFolders
-        let team = devices.ipaTeam, log: @Sendable (String) -> Void = { s in hop { self.append(s) } }
-        nonisolated(unsafe) let runner = runner   // used on the copy's queue only
         let library = ShellLibrary.load(root: root)
         var names: [String: String] = [:]
         for src in sources { names[src.titleID] = driveName(for: src, in: library) }
@@ -296,15 +294,10 @@ extension BuildStore {
                     // The game's folder under the other naming is renamed, so what it holds is not copied again
                     destination = try DriveCopy.prepareDestination(folder: folder, titleID: item.source.titleID, name: name, named: named)
                     lastDest = destination
-                    // The game's framework signed for the shared IPA's team goes with its data (DataFolderFramework)
-                    DataFolderFramework.prepareAll(titleIDs: [item.source.titleID], root: root, team: team, runner: runner, log: log)
-                    DataFolderFramework.removeChangedCopy(in: destination, root: root, titleID: item.source.titleID)
-                    let transfer = ShellInstall.transferSources(archive: item.source.archive, shellRoot: root, titleID: item.source.titleID,
-                                                                includeExternalMSL: true)
                     try DriveCopy.copy(
                         archive: item.source.archive,
-                        files: transfer.sizes,
-                        origins: transfer.origins,
+                        files: item.sizes,
+                        origins: item.origins,
                         to: destination,
                         progress: { itemDone, _ in
                             let current = min(overallTotal, baseDone + itemDone)

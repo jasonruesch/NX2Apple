@@ -216,9 +216,6 @@ package enum ShellInstall {
         var sizes = localFiles(in: archive)
         var origins = Dictionary(uniqueKeysWithValues: sizes.keys.map { ($0, archive + "/" + $0) })
         let upper = titleID.uppercased()
-        if includeExternalMSL, !upper.isEmpty, let root = shellRoot, !root.isEmpty {
-            DataFolderFramework.addFiles(to: &sizes, origins: &origins, root: root, titleID: upper, fm: fm)
-        }
         guard includeExternalMSL, !upper.isEmpty, let root = shellRoot, !root.isEmpty,
               ShellExport.externalizedTitles(root: root, fm: fm).contains(upper) else {
             return (sizes, origins)
@@ -350,8 +347,6 @@ package struct ShellInstaller {
     package var exportBundleID = ""
     /// Every game's shaders leave the shared IPA and go with its game data, not only the sets over `externalMSLThreshold`.
     package var exportAllShadersOut = false
-    /// The shared IPA's team: a game's data sent to that app carries the game's framework signed for it (`DataFolderFramework`).
-    package var dataFrameworkTeam = ""
     /// The codesign the team-signed export runs (a test points it at a stand-in).
     package var codesign = "/usr/bin/codesign"
     package var signingIdentity: (String, ProcessRunner) -> String? = ShellHotInstall.defaultSigningIdentity
@@ -578,10 +573,6 @@ package struct ShellInstaller {
         _ = run(ShellInstall.listCommand(xcrun: xcrun, device: device, bundleID: bundleID, titleID: titleID, json: listing),
                 env: nil, label: checkName, step: { _ in nil })
         let onDevice = ShellInstall.parseListing(FileManager.default.contents(atPath: listing))
-        if includeExternalMSL {
-            DataFolderFramework.prepareAll(titleIDs: [titleID], root: root, team: dataFrameworkTeam, runner: runner,
-                                           identity: signingIdentity, codesign: codesignPath, log: log)
-        }
         let transfer = ShellInstall.transferSources(archive: archive, shellRoot: root, titleID: titleID, includeExternalMSL: includeExternalMSL)
         let local = transfer.sizes
         // The listing still catches missing and interrupted copies. Two releases can also have the same image size.
@@ -592,12 +583,6 @@ package struct ShellInstaller {
         // the image it was sending (`partsReceipt`), and its parts then need not go again.
         let partsReceipt = receipt + "/parts"
         var comparable = onDevice
-        // The game's signed framework goes again when the device has another signing of it (the sizes can all be the same)
-        let frameworkReceipt = receipt + "/framework"
-        let frameworkDigest = includeExternalMSL ? DataFolderFramework.currentDigest(root: root, titleID: titleID) : nil
-        if let frameworkDigest, defaults.string(forKey: frameworkReceipt) != frameworkDigest {
-            comparable = DataFolderFramework.withoutFramework(comparable, titleID: titleID)
-        }
         if identity != previous {
             comparable.removeValue(forKey: "romfs.img")
             if identity == nil || defaults.string(forKey: partsReceipt) != identity {
@@ -721,7 +706,6 @@ package struct ShellInstaller {
             defaults.set(identity, forKey: receipt)
             defaults.removeObject(forKey: partsReceipt)
         }
-        if let frameworkDigest { defaults.set(frameworkDigest, forKey: frameworkReceipt) }
         copyProgress(needed, needed)
         end(Self.copyStageID, copyName, ok: true)
         return outcome

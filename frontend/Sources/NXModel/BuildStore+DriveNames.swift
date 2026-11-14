@@ -15,11 +15,7 @@ extension BuildStore {
     }
 
     /// What the drive holds of the game already: its folder, or its folder under the other naming that the copy will rename.
-    /// The game's signed framework there counts only when it is the current signing (`DataFolderFramework`).
     func driveExistingFiles(folder: String, source: TransferSource, in library: ShellLibrary? = nil) -> [String: Int64] {
-        let name = driveName(for: source, in: library)
-        let have = DriveCopy.existingFiles(folder: folder, titleID: source.titleID, name: name, named: devices.driveNamedFolders)
-        let folders = [true, false].map { DriveCopy.destination(folder: folder, titleID: source.titleID, name: name, named: $0) }
-        return DataFolderFramework.forgetChangedCopy(in: have, gameFolders: folders, root: shellRoot, titleID: source.titleID)
+        DriveCopy.existingFiles(folder: folder, titleID: source.titleID, name: driveName(for: source, in: library), named: devices.driveNamedFolders)
     }
 }
