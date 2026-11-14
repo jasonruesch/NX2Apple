@@ -1,8 +1,8 @@
 import Foundation
 import NXCore
 
-// The last export, remembered: step 3 (send or copy the game data) stays open after the launcher starts again, and after a build when
-// the IPA does not have to be made again for it.
+// The last export, remembered: step 3 (send or copy the game data) stays open after the launcher starts again. A build still
+// clears it: a game built after the IPA is not in it, and iOS loads a game's code only from inside the app.
 
 extension BuildStore {
     nonisolated static let lastExportKey = "lastExport"
@@ -33,12 +33,5 @@ extension BuildStore {
             return
         }
         exportedIPAPath = saved.path
-    }
-
-    /// A build keeps a shared IPA signed for a team: the game's signed code goes with its game data (`DataFolderFramework`), so the
-    /// app plays a game built after it. An unsigned IPA, or one game's own IPA, is made again after a build.
-    var buildKeepsExport: Bool {
-        guard !exportedIPAPath.isEmpty, let saved = lastExport, saved.path == exportedIPAPath else { return false }
-        return !saved.oneGame && !saved.team.isEmpty && saved.team == devices.ipaTeam && !devices.exportOneGame
     }
 }

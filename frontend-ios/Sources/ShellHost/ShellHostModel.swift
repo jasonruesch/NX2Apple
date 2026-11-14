@@ -26,8 +26,6 @@ public struct ShellHostConfig: Sendable {
     /// Split-part byte size used by startup `DataParts.joinAll` (defaults to 512 MiB).
     public var joinPartSize: Int64
     var onJoinProgress: (@Sendable (DataParts.Progress) -> Void)?
-    /// The Apple developer team the app is signed for: a framework beside the game data is loaded only when signed for it.
-    public var hostTeamID: @Sendable () -> String? = { ProvisioningProfile.bundledTeamIdentifier() }
 
     public init(gamesRoot: URL, appDataRoot: URL, hotFrameworksRoot: URL? = nil,
                 environment: HostEnvironment = HostEnvironment(), updateURL: URL? = nil,
@@ -157,20 +155,15 @@ public struct ShellHostConfig: Sendable {
         }
         let gamesRoot = config.gamesRoot
         let hotRoot = config.hotFrameworksRoot
-        let frameworkFolders = dataFrameworkFolders(), hostTeam = config.hostTeamID
         startupJoinTask = Task { [weak self] in
             let joined = await Task.detached(priority: .utility) { () -> Bool in
                 let documents = dataRoot.deletingLastPathComponent()
                 DataParts.writeFeatures(documents: documents)
                 let joined = DataParts.joinAll(appDataRoot: dataRoot, partSize: partSize, onProgress: reportProgress)
-                // A game framework the Mac launcher copied beside the game data joins the library before the scan below
-                let imported = hotRoot.map {
-                    !DataFolderFrameworks.importAll(from: frameworkFolders, hotRoot: $0, gamesRoot: gamesRoot, hostTeam: hostTeam()).isEmpty
-                } ?? false
                 let allEntries = GameCatalogue.scan(root: gamesRoot, hotRoot: hotRoot)
                 let claimed = LooseRomfsClaimer.claimAll(documents: documents, appDataRoot: dataRoot, entries: allEntries)
                 BackupExclusion.apply(appDataRoot: dataRoot)
-                return !joined.isEmpty || !claimed.isEmpty || imported
+                return !joined.isEmpty || !claimed.isEmpty
             }.value
             self?.finishJoinRun(joined: joined, generation: joinGen)
         }
@@ -350,16 +343,6 @@ public struct ShellHostConfig: Sendable {
         }
     }
 
-    /// Where the Mac launcher may have put a game's framework beside its data: the shell data folder, the folders picked for
-    /// single games, and `Documents/games/`. Resolved here on the main actor, read off it.
-    private func dataFrameworkFolders() -> [URL] {
-        var folders: [URL] = []
-        if case .url(let shell) = shellData.resolve() { folders.append(shell) }
-        for entry in entries { if case .url(let picked) = dataStore(entry.id).resolve() { folders.append(picked) } }
-        folders.append(config.appDataRoot)
-        return folders
-    }
-
     private func startLooseRomfsClaim() {
         looseClaimTask?.cancel()
         looseClaimGeneration &+= 1
@@ -368,21 +351,17 @@ public struct ShellHostConfig: Sendable {
         let hotRoot = config.hotFrameworksRoot
         let dataRoot = config.appDataRoot
         let joinTask = startupJoinTask
-        let frameworkFolders = dataFrameworkFolders(), hostTeam = config.hostTeamID
         looseClaimTask = Task { [weak self] in
             await joinTask?.value
             guard !Task.isCancelled else { return }
             let didClaim = await Task.detached(priority: .utility) { () -> Bool in
-                let imported = hotRoot.map {
-                    !DataFolderFrameworks.importAll(from: frameworkFolders, hotRoot: $0, gamesRoot: gamesRoot, hostTeam: hostTeam()).isEmpty
-                } ?? false
                 let entries = GameCatalogue.scan(root: gamesRoot, hotRoot: hotRoot)
                 let claimed = LooseRomfsClaimer.claimAll(
                     documents: dataRoot.deletingLastPathComponent(),
                     appDataRoot: dataRoot,
                     entries: entries
                 )
-                return !claimed.isEmpty || imported
+                return !claimed.isEmpty
             }.value
             guard let self, !Task.isCancelled, self.looseClaimGeneration == generation, !self.launchingGame else { return }
             if didClaim {
@@ -737,7 +716,6 @@ public struct ShellHostConfig: Sendable {
         shellSettings.storeDataFolderName(url.lastPathComponent)
         startShellScan(force: true)
         refreshAll()
-        startLooseRomfsClaim()   // also brings in the game frameworks the folder holds
     }
 
     func pickShellCloudNow() async {

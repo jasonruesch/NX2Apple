@@ -112,27 +112,6 @@ import XCTest
         XCTAssertEqual(makeStore().exportedIPAPath, "")
     }
 
-    func testABuildKeepsOnlyASharedIPASignedForATeam() throws {
-        defer { devices.ipaTeam = ""; devices.exportOneGame = false }
-        let store = makeStore()
-        XCTAssertFalse(store.buildKeepsExport, "no export")
-        store.exportedIPAPath = try file("NX2Apple.ipa")
-        XCTAssertFalse(store.buildKeepsExport, "an unsigned IPA plays only the games inside it")
-
-        devices.ipaTeam = "TEAM123456"
-        store.exportedIPAPath = ""
-        store.exportedIPAPath = try file("NX2Apple.ipa")
-        XCTAssertTrue(store.buildKeepsExport, "a signed shared IPA loads a new game's code from its game data")
-        devices.ipaTeam = "OTHERTEAM1"
-        XCTAssertFalse(store.buildKeepsExport)
-
-        devices.ipaTeam = "TEAM123456"
-        devices.exportOneGame = true
-        store.exportedIPAPath = ""
-        store.exportedIPAPath = try file("Game.ipa")
-        XCTAssertFalse(store.buildKeepsExport, "one game's own IPA")
-    }
-
     private func file(_ name: String) throws -> String {
         let url = temporary.appendingPathComponent(name)
         try Data([0]).write(to: url)
