@@ -40,22 +40,24 @@ package struct ExportSteps: View {
 
 
     package var body: some View {
+        let canExportBuilt = !oneGame && !build.running && build.exportsShell && !build.exportsOneGame
+        let exportBuiltCount = canExportBuilt ? build.builtShellGames().count : 0
         VStack(spacing: 0) {
             step(1, exported ? .done : .current, title: loc.t("shell.step1Title"),
                  sub: exported ? String(format: loc.t(oneGame ? "shell.oneGameDone" : signed ? "shell.step1DoneSigned" : "shell.step1Done"), build.exportedIPAText)
                                : loc.t(oneGame ? "shell.oneGameSub" : signed ? "shell.step1SubSigned" : "shell.step1Sub")) {
                 if exported {
                     HStack(spacing: ExportGrid.gap) {
-                        if !oneGame && build.canExportBuiltGames {
-                            action(loc.t("shell.exportBuilt"), enabled: true) { build.exportBuiltGames() }
+                        if exportBuiltCount > 0 {
+                            action(String(format: loc.t("shell.exportBuilt"), exportBuiltCount), enabled: true) { build.exportBuiltGames() }
                                 .help(loc.t("shell.exportBuiltNote"))
                         }
                         action(loc.t("shell.showInFinder")) { revealInFinder(build.exportedIPAPath) }
                     }
                 } else {
                     HStack(spacing: ExportGrid.gap) {
-                        if build.canExportBuiltGames {   // #994: the IPA of the frameworks already built, no game is built again
-                            action(loc.t("shell.exportBuilt"), enabled: true) { build.exportBuiltGames() }
+                        if exportBuiltCount > 0 {   // #994: the IPA of the frameworks already built, no game is built again
+                            action(String(format: loc.t("shell.exportBuilt"), exportBuiltCount), enabled: true) { build.exportBuiltGames() }
                                 .help(loc.t("shell.exportBuiltNote"))
                         }
                         action(loc.t("shell.step1Button"), enabled: build.canStartBuildOrQueue && !build.running) { build.startBuildOrQueue() }
@@ -90,7 +92,7 @@ package struct ExportSteps: View {
                     .opacity(inert ? ExportGrid.quiet : 1)
             }
             VStack(alignment: .leading, spacing: ExportGrid.noteGap) {
-                if toDrive { driveRow; namingRow; driveStatus } else { deviceRow; deviceStatus }
+                if toDrive { driveRow; driveStatus } else { deviceRow; deviceStatus }
             }
             .padding(.leading, ExportGrid.axis).padding(.trailing, ExportGrid.inset).padding(.bottom, ExportGrid.inset)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -240,25 +242,6 @@ package struct ExportSteps: View {
     }
 
     private var gameDataRow: String { L10n.string("ios.ui.gameData", loc.lang) }
-
-    /// Names each game's folder on the drive after the game instead of its title ID. The device's own folder keeps the title ID, the
-    /// shell needs it there; on a drive it finds the image by its identity, whatever the folder is called.
-    private var namingRow: some View {
-        HStack(alignment: .center, spacing: ExportGrid.gap) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(loc.t("shell.driveNamed")).font(.manrope(13))
-                Text(String(format: loc.t("shell.driveNamedNote"), DriveCopy.namedFolder(titleID: build.packedTitleID.isEmpty ? "0100000000000000" : build.packedTitleID,
-                                                                                      name: build.driveGameName.isEmpty ? "Game" : build.driveGameName)))
-                    .font(.manrope(12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-            Toggle(loc.t("shell.driveNamed"), isOn: Binding(get: { devices.driveNamedFolders },
-                                                            set: { devices.driveNamedFolders = $0; build.refreshDrive() }))
-                .toggleStyle(LauncherSwitchStyle()).labelsHidden()
-                .disabled(copying)
-        }
-        .opacity(inert ? ExportGrid.quiet : 1)
-    }
 
     @ViewBuilder private var driveStatus: some View {
         if case .copying(let done, let total) = build.send {

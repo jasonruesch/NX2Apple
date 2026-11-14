@@ -40,6 +40,12 @@
 0039-ios-game-framework.patch
 0040-ios-touch-settings-and-toggle.patch
 0041-ios-host-teardown.patch
-0043-nvn-post-wait-for-an-unclaimed-ring-slot-and-siz.patch
 0044-host-haptics-drive-joycon-l-and-joycon-r-on-sepa.patch
-0045-nvn-inherit-aliased-virtual-pool-flags-and-bound.patch
+0046-ios-audio-add-dm-audio-mix-audio-session-mixing.patch
+0047-ios-scripts-append-developer-team-id-to-default.patch
+0048-host-guard-async-callbacks-across-shell-teardown.patch
+0049-ios-record-built-at-timestamp-in-embedded-game-m.patch
+0050-ios-fix-bigstack-exit-crash-guest-quit-to-shell.patch
+0051-host-gfx-tools-ios-support-dmmsltr1-shader-trail.patch
+0052-ios-strip-msl-from-framework-only-builds-and-wri.patch
+0053-build-add-persistent-build-seeds-and-fast-refres.patch

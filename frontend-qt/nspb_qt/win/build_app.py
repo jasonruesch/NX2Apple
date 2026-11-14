@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import concurrent.futures as cf
 import hashlib
+import json
 import os
 import plistlib
 import re
@@ -32,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 if __package__:
@@ -697,6 +699,128 @@ def shader_lib_real_path(repo: Path, lib: Path) -> Path:
     return img if img.is_file() and not (lib / 'inputs.tsv').is_file() else lib
 
 
+def _stage_link_or_copy_file(src: Path, dst: Path) -> None:
+    if dst.is_symlink() or dst.exists():
+        dst.unlink(missing_ok=True)
+    try:
+        os.symlink(src.resolve(), dst)
+    except OSError:
+        pbc.link_or_copy_file(src, dst)
+
+
+def record_msl_cache(
+    *,
+    repo: Path,
+    framework_only: Path,
+    game: str,
+    gfx: str,
+    msldir: str,
+    msl_ios: Path,
+    lib_src: Path,
+    chain_ver: str,
+    programs_tsv: str = '',
+) -> Path:
+    """Write `<framework_only>/.msl-cache/<GAME>.json` atomically, matching `build_ipa.sh`."""
+    if not lib_src.exists():
+        die(f'no iOS shader libraries at {msl_ios / msldir}')
+
+    cache_dir = Path(framework_only) / '.msl-cache'
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    chain = msldir if gfx == 'nvn' else ''
+
+    prog_lines: list[list[str]] = []
+    if programs_tsv:
+        tsv_path = Path(programs_tsv)
+        if not tsv_path.is_file():
+            die(f'no PROGRAMS_TSV {tsv_path}')
+        for raw_ln in tsv_path.read_text(encoding='utf-8', errors='replace').splitlines():
+            stripped = raw_ln.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+            prog_lines.append(raw_ln.split('\t'))
+
+    stage_dir = cache_dir / f'{game}_multi'
+    if prog_lines:
+        multi_program = True
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        programs: list[dict[str, object]] = []
+        for cols in prog_lines:
+            if len(cols) < 5:
+                die(f'malformed row in {programs_tsv}: {cols!r}')
+            pn = cols[0].strip()
+            if not re.fullmatch(r'\d+', pn):
+                die(f'invalid program index in {programs_tsv}: {pn!r}')
+            p_game = cols[1].strip()
+            p_msl_root = Path(cols[4].strip())
+            p_gfx = (cols[5].strip() if len(cols) > 5 and cols[5].strip() else gfx) or 'nvn'
+            if p_gfx == 'vulkan':
+                p_msldir = 'vk'
+            elif p_gfx == 'gl':
+                p_msldir = 'gl'
+            else:
+                p_msldir = f'b-{chain_ver}'
+            p_chain = p_msldir if p_gfx == 'nvn' else ''
+            p_lib = shader_lib_real_path(repo, p_msl_root / p_msldir)
+            if not p_lib.exists():
+                die(f'no iOS shader libraries at {p_msl_root / p_msldir}')
+            p_dir = stage_dir / f'p{pn}'
+            p_dir.mkdir(parents=True, exist_ok=True)
+            if p_lib.is_file():
+                _stage_link_or_copy_file(p_lib, p_dir / p_lib.name)
+            elif p_lib.is_dir():
+                sub_dir = p_dir / p_msldir
+                sub_dir.mkdir(parents=True, exist_ok=True)
+                for item in sorted(p_lib.iterdir(), key=lambda x: x.name):
+                    if item.is_dir():
+                        pbc.link_or_copy_tree(item, sub_dir / item.name)
+                    else:
+                        _stage_link_or_copy_file(item, sub_dir / item.name)
+            programs.append({
+                'program': int(pn),
+                'title_id': p_game,
+                'gfx_api': p_gfx,
+                'chain': p_chain,
+                'msl_root': str(p_msl_root),
+                'lib_path': str(p_lib),
+            })
+        recorded_lib_path = str(stage_dir)
+    else:
+        multi_program = False
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        programs = []
+        recorded_lib_path = str(lib_src)
+
+    meta = {
+        'schema': 1,
+        'title_id': game,
+        'gfx_api': gfx,
+        'chain': chain,
+        'multi_program': multi_program,
+        'msl_root': str(msl_ios),
+        'lib_path': recorded_lib_path,
+        'programs': programs,
+    }
+    payload = json.dumps(meta, indent=2) + '\n'
+
+    def _write_atomic(dst_json: Path) -> None:
+        tmp_fd, tmp_file = tempfile.mkstemp(prefix=f'{dst_json.name}.tmp.', dir=str(cache_dir))
+        try:
+            with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+                f.write(payload)
+            os.replace(tmp_file, dst_json)
+        except BaseException:
+            Path(tmp_file).unlink(missing_ok=True)
+            raise
+
+    target_json = cache_dir / f'{game}.json'
+    _write_atomic(target_json)
+    upper_json = cache_dir / f'{game.upper()}.json'
+    if game != game.upper() and re.fullmatch(r'[0-9A-Fa-f]{16}', game) and not upper_json.exists():
+        _write_atomic(upper_json)
+    return target_json
+
+
 def build_pso_archive(repo: Path, w: Path, game: str, gd: Path, gp, gfx: str,
                       msl_ios: Path, v: str, env) -> Path | None:
     """Run `dm/gfx/tools/pso_offline.py` when the game profile or `DM_PSO_GPUS` requests an archive."""
@@ -746,6 +870,20 @@ def build_pso_archive(repo: Path, w: Path, game: str, gd: Path, gp, gfx: str,
         return None
     pbc.clean_pso_batches(w / 'build/ios/pso/work')
     return pso
+
+
+def resolve_bundle_id(game: str, env: Mapping[str, str]) -> str:
+    """Resolve the iOS bundle ID for a single-game build or DmGame framework."""
+    explicit = env.get('DM_BUNDLE_ID')
+    if explicit:
+        return explicit
+    base = f'org.nxnative.{game.lower()}'
+    if env.get('DM_FRAMEWORK_ONLY'):
+        return base
+    team_id = (env.get('DM_TEAM_ID') or '').strip()
+    if team_id and team_id != '0000000000':
+        return f'{base}.{team_id}'
+    return base
 
 
 # ---------------------------------------------------------------- main
@@ -811,7 +949,13 @@ def main(argv: list[str] | None = None) -> int:
     for m in mods:
         if not ((patched / f'{m}.patched.bin').exists() and (patched / f'{m}.fixups.tsv').exists()):
             die(f'no rewritten module {patched}/{m} (the rewrite step must run first)')
-    if not romfs_has(repo, romfs, marker):
+    romfs_identity = (env.get('DM_ROMFS_IDENTITY') or '').strip()
+    allow_missing_romfs = (
+        (env.get('DM_COPY_ROMFS', '').upper() == 'NO' or bool(env.get('DM_FRAMEWORK_ONLY')))
+        and romfs_identity.startswith('DMROMFSID1 ')
+        and not Path(romfs).exists()
+    )
+    if not allow_missing_romfs and not romfs_has(repo, romfs, marker):
         die(f'no RomFS at {romfs} (missing {marker})')
 
     nacp = Path(env['CONTROL']) if env.get('CONTROL') else (w / 'data/v0/control.nacp')
@@ -824,7 +968,7 @@ def main(argv: list[str] | None = None) -> int:
         except SystemExit:
             die(f'no game name in {nacp} (set DM_DISPLAY_NAME)')
     version = env.get('DM_APP_VERSION') or '1.0'
-    bundle_id = env.get('DM_BUNDLE_ID') or f'org.nxnative.{game.lower()}'
+    bundle_id = resolve_bundle_id(game, env)
     show_fps = env.get('DM_SHOW_FPS', '0') in ('1', 'YES', 'yes', 'TRUE', 'true')
     lang = env.get('DM_LANG') or 'en-US'
     try:
@@ -1075,7 +1219,7 @@ def main(argv: list[str] | None = None) -> int:
         out_fw = Path(framework_only) / f'{fw_name}.framework'
         out_fw.mkdir(parents=True, exist_ok=True)
         for child in list(out_fw.iterdir()):
-            if child.name in ('msl', 'pso', 'icon.png') or child.name.startswith('banner.'):
+            if child.name in ('pso', 'icon.png') or child.name.startswith('banner.'):
                 continue
             if child.is_dir():
                 shutil.rmtree(child, ignore_errors=True)
@@ -1096,6 +1240,8 @@ def main(argv: list[str] | None = None) -> int:
             if r_id.returncode != 0 or not r_id.stdout.strip():
                 die(f'identity of {romfs}: {r_id.stderr.strip() or r_id.stdout.strip()}')
             romfs_id = r_id.stdout.strip()
+        elif not romfs.is_file() and romfs_identity.startswith('DMROMFSID1 '):
+            romfs_id = romfs_identity
 
         manifest_args = build_manifest_args(
             repo=repo,
@@ -1111,6 +1257,8 @@ def main(argv: list[str] | None = None) -> int:
             fw_name=fw_name,
             patched=patched,
             gd=gd,
+            gfx_api=gfx,
+            built_at=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         )
         py(*manifest_args)
 
@@ -1121,28 +1269,19 @@ def main(argv: list[str] | None = None) -> int:
                                                deployment=deployment),
                           f, fmt=plistlib.FMT_BINARY)
 
+        shutil.rmtree(out_fw / 'msl', ignore_errors=True)
         lib_src = shader_lib_real_path(repo, msl_ios / msldir)
-        msl_dst = out_fw / 'msl'
-        msl_dst.mkdir(parents=True, exist_ok=True)
-        if lib_src.is_file():
-            shutil.rmtree(msl_dst / msldir, ignore_errors=True)
-            target_img = msl_dst / f'{msldir}.img'
-            if not (target_img.is_file()
-                    and target_img.stat().st_size == lib_src.stat().st_size
-                    and abs(target_img.stat().st_mtime - lib_src.stat().st_mtime) < 1):
-                pbc.link_or_copy_file(lib_src, target_img)
-            keep_name = f'{msldir}.img'
-        else:
-            (msl_dst / f'{msldir}.img').unlink(missing_ok=True)
-            target_dir = msl_dst / msldir
-            pbc.link_or_copy_tree(lib_src, target_dir)
-            keep_name = msldir
-        for old in list(msl_dst.iterdir()):
-            if old.name != keep_name:
-                if old.is_dir():
-                    shutil.rmtree(old, ignore_errors=True)
-                else:
-                    old.unlink(missing_ok=True)
+        record_msl_cache(
+            repo=repo,
+            framework_only=Path(framework_only),
+            game=game,
+            gfx=env.get('FW_GFXAPI') or gfx,
+            msldir=msldir,
+            msl_ios=msl_ios,
+            lib_src=lib_src,
+            chain_ver=v,
+            programs_tsv=env.get('PROGRAMS_TSV') or '',
+        )
 
         if pso and pso.is_dir():
             pbc.link_or_copy_tree(pso, out_fw / 'pso')
@@ -1203,6 +1342,10 @@ def main(argv: list[str] | None = None) -> int:
                 # CRLF leaves a trailing CR, so romfs_id_parse rejects it.
                 rid_file.write_bytes(r_id.stdout.replace(b'\r\n', b'\n'))
                 maps.append(f'Payload/DmIOS.app/romfs.id={rid_file}')
+        elif romfs_identity.startswith('DMROMFSID1 '):
+            rid_file = base / 'romfs.id'
+            rid_file.write_bytes(romfs_identity.encode('utf-8') + b'\n')
+            maps.append(f'Payload/DmIOS.app/romfs.id={rid_file}')
         t('packing a slim IPA without the RomFS (the game files come from Documents/romfs)')
     try:
         store = gp('zip_store', '') or ''
@@ -1287,6 +1430,8 @@ def build_manifest_args(
     fw_name: str,
     patched: Path,
     gd: Path,
+    gfx_api: str = '',
+    built_at: str = '',
 ) -> list[Path | str]:
     """Build argument vector for `dm/ios/tools/gen_manifest.py`, forwarding `--profile` when present."""
     args: list[Path | str] = [
@@ -1303,6 +1448,10 @@ def build_manifest_args(
         '--framework-name', fw_name,
         '--loader', 'FH',
     ]
+    if gfx_api:
+        args += ['--gfx-api', gfx_api]
+    if built_at:
+        args += ['--built-at', built_at]
     if (patched / 'nro.tsv').is_file():
         args += ['--nro-table', patched / 'nro.tsv']
     if (gd / 'game.tsv').is_file():

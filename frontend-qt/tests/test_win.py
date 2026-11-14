@@ -3889,8 +3889,12 @@ class WindowsBuildFixesTest(unittest.TestCase):
             def __init__(self, *_a, **_kw) -> None:
                 self._d: dict[str, object] = {}
 
-            def value(self, k: str, default: object = '') -> object:
-                return self._d.get(k, default)
+            def value(self, k: str, default: object = '', *, defaultValue: object = None, type: object = None) -> object:
+                fallback = defaultValue if defaultValue is not None else default
+                val = self._d.get(k, fallback)
+                if type is str and val is not None:
+                    return str(val)
+                return val
 
             def setValue(self, k: str, v: object) -> None:
                 self._d[k] = v
@@ -4035,10 +4039,10 @@ class WindowsBuildFixesTest(unittest.TestCase):
                 m.base_path = str(root / f'Game [{tid}][v0].nsp')
                 self.assertEqual(m.pack_archive(title_id=tid), (True, ''))
 
-                dest = out / 'games' / tid
+                dest = out / 'games' / 'Super Mario Bros. Wonder'
                 self.assertEqual(Path(m.archive_path), dest)
-                self.assertEqual((dest / 'romfs.img').read_bytes(), img_new)
-                self.assertEqual((dest / 'romfs.img.id').read_bytes(), id_bytes)
+                self.assertEqual((dest / 'Super Mario Bros. Wonder.img').read_bytes(), img_new)
+                self.assertEqual((dest / 'Super Mario Bros. Wonder.img.id').read_bytes(), id_bytes)
                 self.assertFalse((v0 / 'RomFS.img').exists())
                 self.assertFalse((v65536 / 'RomFS.img').exists())
                 self.assertFalse((v131072 / 'RomFS.img').exists())
@@ -4052,10 +4056,10 @@ class WindowsBuildFixesTest(unittest.TestCase):
                 )
                 self.assertEqual(lang_row['note'], '')
 
-                # When the extracted image has no .id file on a subsequent archive, any stale romfs.img.id is removed
+                # When the extracted image has no .id file on a subsequent archive, any stale .img.id is removed
                 (v131072 / 'RomFS.img').write_bytes(img_new)
                 self.assertEqual(m.pack_archive(title_id=tid), (True, ''))
-                self.assertFalse((dest / 'romfs.img.id').exists())
+                self.assertFalse((dest / 'Super Mario Bros. Wonder.img.id').exists())
 
     def test_romfs_languages_handles_mals_corrupted_headers_and_cache_invalidation(self) -> None:
         import struct
@@ -6436,20 +6440,28 @@ class WindowsDefenderExclusionsTest(unittest.TestCase):
                     outer_b64 = cmd[cmd.index('-EncodedCommand') + 1]
                     outer_ps = base64.b64decode(outer_b64).decode('utf-16-le')
                     self.assertIn('-Verb RunAs', outer_ps)
-                    m_inner = re.search(r"'-EncodedCommand',\s*'([A-Za-z0-9+/=]+)'", outer_ps)
-                    self.assertIsNotNone(m_inner)
-                    inner_ps = base64.b64decode(m_inner.group(1)).decode('utf-16-le')
-                    self.assertIn('Add-MpPreference -ExclusionPath', inner_ps)
-                    self.assertIn('Add-MpPreference -ExclusionProcess', inner_ps)
+                    m_arg = re.search(r'\$argList\s*=\s*@\(([^)]+)\)', outer_ps)
+                    self.assertIsNotNone(m_arg)
+                    self.assertLess(len(m_arg.group(1)), 512, 'elevated RunAs arguments must stay compact')
+                    m_ps1 = re.search(r"'-File',\s*'([^']+(?:''[^']+)*\.ps1)'", outer_ps)
+                    self.assertIsNotNone(m_ps1, f'expected -File *.ps1 in outer script, got:\n{outer_ps}')
+                    ps1_path = Path(m_ps1.group(1).replace("''", "'"))
+                    raw_ps1 = ps1_path.read_bytes()
+                    self.assertTrue(raw_ps1.startswith(b'\xef\xbb\xbf'), 'elevated .ps1 must include UTF-8 BOM')
+                    inner_ps = raw_ps1.decode('utf-8-sig')
                     m_path = re.search(r"\$payloadPath = '([^']+(?:''[^']+)*)'", inner_ps)
                     self.assertIsNotNone(m_path)
                     payload_path = Path(m_path.group(1).replace("''", "'"))
-                    payload = json.loads(payload_path.read_text(encoding='utf-8'))
+                    raw_payload = payload_path.read_text(encoding='utf-8')
+                    self.assertTrue(raw_payload.isascii(), 'payload.json should use ASCII \\u escapes')
+                    payload = json.loads(raw_payload)
                     return outer_ps, inner_ps, payload
 
                 # Case A: UAC cancelled by user (exit code 1223) -> cancelled=True, state NOT saved
                 def runner_uac_cancelled(cmd, **_kw):
-                    _outer, _inner, payload = extract_payload(cmd)
+                    _outer, inner_ps, payload = extract_payload(cmd)
+                    self.assertIn('Add-MpPreference -ExclusionPath', inner_ps)
+                    self.assertIn('Add-MpPreference -ExclusionProcess', inner_ps)
                     self.assertIn(d._norm_win_path(tricky_dir), payload['paths'])
                     return subprocess.CompletedProcess(cmd, d.ERROR_CANCELLED, '', '')
 
@@ -6510,16 +6522,9 @@ class WindowsDefenderExclusionsTest(unittest.TestCase):
 
                 # E1: Partial removal failure retains remaining_paths in defender_exclusions.json
                 def runner_remove_partial(cmd, **_kw):
-                    outer_b64 = cmd[cmd.index('-EncodedCommand') + 1]
-                    outer_ps = base64.b64decode(outer_b64).decode('utf-16-le')
-                    m_inner = re.search(r"'-EncodedCommand',\s*'([A-Za-z0-9+/=]+)'", outer_ps)
-                    self.assertIsNotNone(m_inner)
-                    inner_ps = base64.b64decode(m_inner.group(1)).decode('utf-16-le')
+                    _outer, inner_ps, payload = extract_payload(cmd)
                     self.assertIn('$batchSize = 20', inner_ps)
                     self.assertIn('Get-MpPreference', inner_ps)
-                    m_path = re.search(r"\$payloadPath = '([^']+(?:''[^']+)*)'", inner_ps)
-                    payload_path = Path(m_path.group(1).replace("''", "'"))
-                    payload = json.loads(payload_path.read_text(encoding='utf-8'))
                     self.assertGreaterEqual(len(payload['paths']), 46)
                     Path(payload['result_path']).write_text(
                         json.dumps({
@@ -6538,16 +6543,9 @@ class WindowsDefenderExclusionsTest(unittest.TestCase):
 
                 # E2: Full removal deletes defender_exclusions.json
                 def runner_remove_ok(cmd, **_kw):
-                    outer_b64 = cmd[cmd.index('-EncodedCommand') + 1]
-                    outer_ps = base64.b64decode(outer_b64).decode('utf-16-le')
-                    m_inner = re.search(r"'-EncodedCommand',\s*'([A-Za-z0-9+/=]+)'", outer_ps)
-                    self.assertIsNotNone(m_inner)
-                    inner_ps = base64.b64decode(m_inner.group(1)).decode('utf-16-le')
+                    _outer, inner_ps, payload = extract_payload(cmd)
                     self.assertIn('Remove-MpPreference -ExclusionPath', inner_ps)
                     self.assertIn('Remove-MpPreference -ExclusionProcess', inner_ps)
-                    m_path = re.search(r"\$payloadPath = '([^']+(?:''[^']+)*)'", inner_ps)
-                    payload_path = Path(m_path.group(1).replace("''", "'"))
-                    payload = json.loads(payload_path.read_text(encoding='utf-8'))
                     Path(payload['result_path']).write_text(
                         json.dumps({'ok': True, 'error': '', 'remaining_paths': [], 'remaining_processes': []}),
                         encoding='utf-8',
@@ -6560,12 +6558,272 @@ class WindowsDefenderExclusionsTest(unittest.TestCase):
                 st_removed, _, _ = d.exclusions_status(games_folder=tricky_dir)
                 self.assertEqual(st_removed, 'needed')
 
+    def test_defender_clixml_progress_stripping_win11_early_exit_and_tamper_codes(self) -> None:
+        import base64
+        import re
+        import threading
+        import time
+        d = self.defender
+
+        progress_xml = (
+            '#< CLIXML\n'
+            '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">'
+            '<Obj S="progress" RefId="0"><TN RefId="0">'
+            '<T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN>'
+            '<MS><I64 N="SourceId">1</I64><PR N="Record">'
+            '<AV>\ufffd\ufffd\ufffd\ufffd\ufffd</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC>'
+            '<T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>'
+        )
+        self.assertEqual(d.sanitize_powershell_output(progress_xml), '')
+
+        mixed_xml = (
+            progress_xml
+            + '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">'
+            + '<S S="Error">Add-MpPreference : &lt;Tamper blocked&gt;_x000D__x000A_</S>'
+            + '</Objs>'
+        )
+        self.assertEqual(
+            d.sanitize_powershell_output(mixed_xml),
+            'Add-MpPreference : <Tamper blocked>',
+        )
+
+        # Localized Windows console codepage bytes must decode cleanly instead of mojibake
+        self.assertEqual(d._decode_console_bytes('正在准备'.encode('gbk')), '正在准备')
+
+        # Generated scripts must record started.json inside try/catch and guard HideExclusionsFromLocalAdmins
+        elev_script = d.build_inner_elevation_script(r'C:\Users\Test\payload.json')
+        self.assertIn("$ProgressPreference = 'SilentlyContinue'", elev_script)
+        self.assertIn('Write-AtomicJson $startedPath @{ pid = $PID }', elev_script)
+        self.assertIn('HideExclusionsFromLocalAdmins', elev_script)
+        self.assertIn('Get-DefenderFailureCode', elev_script)
+        self.assertLess(
+            elev_script.index('try {'),
+            elev_script.index('ReadAllText($payloadPath'),
+            'reading payload.json must sit inside top-level try/catch',
+        )
+
+        # Progress-only CLIXML bytes on stderr without result.json must never leak XML into user-facing error
+        with tempfile.TemporaryDirectory() as td:
+            fake_tools = Path(td) / 'NS Port Builder' / 'tools'
+            fake_tools.mkdir(parents=True)
+            with mock.patch.object(tc, 'tools_dir', return_value=fake_tools):
+                folders, procs = d.collect_exclusions(games_folder=r'D:\Games')
+
+                def runner_progress_only(cmd, **_kw):
+                    return subprocess.CompletedProcess(cmd, 1, b'', progress_xml.encode('gbk', errors='replace'))
+
+                res = d.apply_exclusions(folders, procs, runner=runner_progress_only)
+                self.assertFalse(res.ok)
+                self.assertNotIn('CLIXML', res.error)
+                self.assertNotIn('<Obj', res.error)
+                self.assertIn('without writing result.json', res.error)
+
+                def runner_clixml_real_error(cmd, **_kw):
+                    return subprocess.CompletedProcess(cmd, 1, b'', mixed_xml.encode('utf-8'))
+
+                res_real = d.apply_exclusions(folders, procs, runner=runner_clixml_real_error)
+                self.assertFalse(res_real.ok)
+                self.assertIn('<Tamper blocked>', res_real.error)
+
+                # Native result_path error_code must flow through DefenderResult
+                def runner_tamper_code(cmd, **_kw):
+                    outer_b64 = cmd[cmd.index('-EncodedCommand') + 1]
+                    outer_ps = base64.b64decode(outer_b64).decode('utf-16-le')
+                    m_ps1 = re.search(r"'-File',\s*'([^']+(?:''[^']+)*\.ps1)'", outer_ps)
+                    inner_ps = Path(m_ps1.group(1).replace("''", "'")).read_text(encoding='utf-8-sig')
+                    m_path = re.search(r"\$payloadPath = '([^']+(?:''[^']+)*)'", inner_ps)
+                    payload = json.loads(Path(m_path.group(1).replace("''", "'")).read_text(encoding='utf-8'))
+                    Path(payload['result_path']).write_text(
+                        json.dumps({'ok': False, 'error': 'blocked', 'error_code': 'tamper_blocked'}),
+                        encoding='utf-8',
+                    )
+                    return subprocess.CompletedProcess(cmd, 1, b'', b'')
+
+                res_tamper = d.apply_exclusions(folders, procs, runner=runner_tamper_code)
+                self.assertFalse(res_tamper.ok)
+                self.assertEqual(res_tamper.error_code, 'tamper_blocked')
+
+        # Win11 Windows Terminal delegation: initial broker exits at t=0, elevated script writes result.json later
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td)
+            res_f = work / 'result.json'
+            start_f = work / 'started.json'
+
+            def delayed_elevated():
+                time.sleep(0.06)
+                start_f.write_text(json.dumps({'pid': 424242}), encoding='utf-8')
+                time.sleep(0.08)
+                res_f.write_text(json.dumps({'ok': True, 'error': ''}), encoding='utf-8')
+
+            th = threading.Thread(target=delayed_elevated, daemon=True)
+            th.start()
+            got_res = d._wait_for_elevated_result(
+                res_f,
+                start_f,
+                initial_done_fn=lambda: True,
+                pid_alive_fn=lambda pid: pid == 424242,
+                timeout_sec=3.0,
+                early_start_grace_sec=1.0,
+                poll_interval_sec=0.01,
+            )
+            th.join(timeout=1.0)
+            self.assertTrue(got_res)
+            self.assertTrue(res_f.is_file())
+
+            # Dead inner pid without result.json must stop early instead of waiting for full timeout
+            work2 = Path(td) / 'dead'
+            work2.mkdir()
+            res_f2 = work2 / 'result.json'
+            start_f2 = work2 / 'started.json'
+            start_f2.write_text(json.dumps({'pid': 999999}), encoding='utf-8')
+            t0 = time.monotonic()
+            got_res2 = d._wait_for_elevated_result(
+                res_f2,
+                start_f2,
+                initial_done_fn=lambda: True,
+                pid_alive_fn=lambda _pid: False,
+                timeout_sec=5.0,
+                early_start_grace_sec=1.0,
+                poll_interval_sec=0.01,
+            )
+            self.assertFalse(got_res2)
+            self.assertLess(time.monotonic() - t0, 1.0)
+
+        # Transient PermissionError on rmdir retries cleanly, removes empty stale defender-* sibling dirs,
+        # and preserves non-empty sibling dirs; _launch_elevated_win32 avoids locking work_td as lpDirectory
+        import inspect
+        launch_src = inspect.getsource(d._launch_elevated_win32)
+        self.assertIn('Path(work_td).parent', launch_src)
+        self.assertNotIn('sei.lpDirectory = work_td', launch_src)
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            work_dir = base / 'defender-current'
+            work_dir.mkdir()
+            temp_file = work_dir / 'result.json'
+            temp_file.write_text('{}', encoding='utf-8')
+            stale_empty = base / 'defender-stale'
+            stale_empty.mkdir()
+            stale_active = base / 'defender-active'
+            stale_active.mkdir()
+            (stale_active / 'payload.json').write_text('{}', encoding='utf-8')
+
+            real_rmdir = os.rmdir
+            attempts = {'n': 0}
+
+            def flaky_rmdir(path):
+                if Path(path) == work_dir and attempts['n'] < 2:
+                    attempts['n'] += 1
+                    raise PermissionError(32, 'directory handle still held')
+                return real_rmdir(path)
+
+            with mock.patch('nspb_qt.win.defender.os.rmdir', side_effect=flaky_rmdir), \
+                 mock.patch('nspb_qt.win.defender.time.sleep'):
+                d._cleanup_work_dir(str(work_dir), temp_file)
+
+            self.assertEqual(attempts['n'], 2)
+            self.assertFalse(work_dir.exists())
+            self.assertFalse(stale_empty.exists())
+            self.assertTrue((stale_active / 'payload.json').is_file())
+
+    def test_ipc_work_dir_avoids_mkdtemp_owner_rights_and_grants_caller_dacl(self) -> None:
+        import base64
+        import re
+        d = self.defender
+        with tempfile.TemporaryDirectory() as td:
+            fake_tools = Path(td) / 'NS Port Builder' / 'tools'
+            fake_tools.mkdir(parents=True)
+            seen_dirs: list[Path] = []
+
+            def fake_runner(cmd, **_kw):
+                outer_b64 = cmd[cmd.index('-EncodedCommand') + 1]
+                outer_ps = base64.b64decode(outer_b64).decode('utf-16-le')
+                m_ps1 = re.search(r"'-File',\s*'([^']+(?:''[^']+)*\.ps1)'", outer_ps)
+                ps1_path = Path(m_ps1.group(1).replace("''", "'"))
+                seen_dirs.append(ps1_path.parent)
+                inner_ps = ps1_path.read_text(encoding='utf-8-sig')
+                self.assertIn('GetAccessControl($payloadPath)', inner_ps)
+                self.assertIn('SetAccessControl($tmpPath, $dacl)', inner_ps)
+                self.assertIn('AccessControlSections]::Access', inner_ps)
+                m_path = re.search(r"\$payloadPath = '([^']+(?:''[^']+)*)'", inner_ps)
+                payload = json.loads(Path(m_path.group(1).replace("''", "'")).read_text(encoding='utf-8'))
+                Path(payload['result_path']).write_text(
+                    json.dumps({'ok': True, 'error': '', 'error_code': ''}),
+                    encoding='utf-8',
+                )
+                return subprocess.CompletedProcess(cmd, 0, b'', b'')
+
+            with mock.patch.object(tc, 'tools_dir', return_value=fake_tools), \
+                 mock.patch('nspb_qt.win.defender.tempfile.mkdtemp', side_effect=AssertionError('must not call mkdtemp')):
+                folders, procs = d.collect_exclusions(games_folder=r'D:\Games')
+                res = d.apply_exclusions(folders, procs, runner=fake_runner)
+
+            self.assertTrue(res.ok, res.error)
+            self.assertEqual(len(seen_dirs), 1)
+            self.assertTrue(seen_dirs[0].name.startswith('defender-'))
+            self.assertFalse(seen_dirs[0].exists())
+
+    def test_result_json_transient_permission_error_retries_and_surfaces_unrecoverable_error(self) -> None:
+        import base64
+        import re
+        d = self.defender
+        with tempfile.TemporaryDirectory() as td:
+            fake_tools = Path(td) / 'NS Port Builder' / 'tools'
+            fake_tools.mkdir(parents=True)
+            real_read_text = Path.read_text
+
+            def runner_ok(cmd, **_kw):
+                outer_b64 = cmd[cmd.index('-EncodedCommand') + 1]
+                outer_ps = base64.b64decode(outer_b64).decode('utf-16-le')
+                m_ps1 = re.search(r"'-File',\s*'([^']+(?:''[^']+)*\.ps1)'", outer_ps)
+                inner_ps = real_read_text(Path(m_ps1.group(1).replace("''", "'")), encoding='utf-8-sig')
+                m_path = re.search(r"\$payloadPath = '([^']+(?:''[^']+)*)'", inner_ps)
+                payload = json.loads(real_read_text(Path(m_path.group(1).replace("''", "'")), encoding='utf-8'))
+                Path(payload['result_path']).write_text(
+                    json.dumps({'ok': True, 'error': '', 'error_code': ''}),
+                    encoding='utf-8',
+                )
+                return subprocess.CompletedProcess(cmd, 0, b'', b'')
+
+            # Scenario A: two transient sharing-violation failures on result.json, third attempt succeeds
+            transient_reads = {'n': 0}
+
+            def flaky_read_text(path_self, *args, **kwargs):
+                if path_self.name == 'result.json' and transient_reads['n'] < 2:
+                    transient_reads['n'] += 1
+                    raise PermissionError(32, 'WinError 32: file in use by AV scan')
+                return real_read_text(path_self, *args, **kwargs)
+
+            with mock.patch.object(tc, 'tools_dir', return_value=fake_tools), \
+                 mock.patch.object(Path, 'read_text', autospec=True, side_effect=flaky_read_text), \
+                 mock.patch('nspb_qt.win.defender.time.sleep'):
+                folders, procs = d.collect_exclusions(games_folder=r'D:\Games')
+                res_a = d.apply_exclusions(folders, procs, runner=runner_ok)
+
+            self.assertTrue(res_a.ok, res_a.error)
+            self.assertEqual(transient_reads['n'], 2)
+
+            # Scenario B: persistent ACL denial with exit code 0 must report real read error, never 'exit code 0'
+            def denied_read_text(path_self, *args, **kwargs):
+                if path_self.name == 'result.json':
+                    raise PermissionError(5, 'WinError 5: Access is denied')
+                return real_read_text(path_self, *args, **kwargs)
+
+            with mock.patch.object(tc, 'tools_dir', return_value=fake_tools), \
+                 mock.patch.object(Path, 'read_text', autospec=True, side_effect=denied_read_text), \
+                 mock.patch('nspb_qt.win.defender.time.sleep'):
+                res_b = d.apply_exclusions(folders, procs, runner=runner_ok)
+
+            self.assertFalse(res_b.ok)
+            self.assertIn('failed to read result.json', res_b.error)
+            self.assertIn('PermissionError', res_b.error)
+            self.assertNotEqual(res_b.error.strip(), 'exit code 0')
+
     def test_model_defender_generation_guard_and_all_seven_languages(self) -> None:
         import ast
         from nspb_qt.i18n import Lang
         from nspb_qt.l10n import t as l10n_t
 
-        # 1. Verify all 27 defender.* keys exist, contain no semicolons, and format cleanly across all 10 languages
+        # 1. Verify all 29 defender.* keys exist, contain no semicolons, and format cleanly across all 10 languages
         self.assertGreaterEqual(len(Lang.all()), 10)
         defender_keys = (
             'defender.addBtn',
@@ -6573,7 +6831,9 @@ class WindowsDefenderExclusionsTest(unittest.TestCase):
             'defender.msg.added',
             'defender.msg.cancelled',
             'defender.msg.failed',
+            'defender.msg.inactive',
             'defender.msg.removed',
+            'defender.msg.tamperBlocked',
             'defender.msg.waiting',
             'defender.note',
             'defender.prompt.addAndBuild',
@@ -6607,6 +6867,7 @@ class WindowsDefenderExclusionsTest(unittest.TestCase):
                 self.assertTrue(val and val != key, f'missing translation for {key} in {lg.code}')
                 self.assertNotIn('%@', val, f'unformatted placeholder in {key} ({lg.code}): {val}')
                 self.assertNotIn(';', val, f'semicolon forbidden in UI string {key} ({lg.code}): {val}')
+                self.assertNotIn('；', val, f'fullwidth semicolon forbidden in UI string {key} ({lg.code}): {val}')
 
         # 2. Verify Model.apply_defender_exclusions and remove_defender_exclusions generation guard
         src = (QT / 'nspb_qt' / 'model.py').read_text(encoding='utf-8')
@@ -6614,6 +6875,7 @@ class WindowsDefenderExclusionsTest(unittest.TestCase):
         cls_node = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'Model')
         wanted = {
             '_current_build_dirs',
+            '_defender_failure_message',
             'defender_info',
             'should_prompt_defender_before_build',
             'apply_defender_exclusions',
@@ -6658,6 +6920,7 @@ class WindowsDefenderExclusionsTest(unittest.TestCase):
 
         class _Harness:
             _current_build_dirs = ns['_current_build_dirs']
+            _defender_failure_message = ns['_defender_failure_message']
             defender_info = ns['defender_info']
             should_prompt_defender_before_build = ns['should_prompt_defender_before_build']
             apply_defender_exclusions = ns['apply_defender_exclusions']
@@ -6763,6 +7026,29 @@ class WindowsDefenderExclusionsTest(unittest.TestCase):
                 self.assertEqual(h.defender_status_msg, h.t('defender.msg.removed'))
                 self.assertFalse(h.settings_value('defenderPromptDismissed', False))
                 self.assertEqual(rem_calls, [(True, False)])
+
+                # Structured failure codes map cleanly to localized user guidance on both apply & remove
+                h.apply_defender_exclusions()
+                w_tamper = pending_workers.pop(0)
+                with mock.patch.object(
+                    self.defender,
+                    'apply_exclusions',
+                    return_value=self.defender.DefenderResult(ok=False, error='blocked', error_code='tamper_blocked'),
+                ):
+                    w_tamper()
+                self.assertFalse(h.defender_status_ok)
+                self.assertEqual(h.defender_status_msg, h.t('defender.msg.tamperBlocked'))
+
+                h.remove_defender_exclusions()
+                w_inact = pending_workers.pop(0)
+                with mock.patch.object(
+                    self.defender,
+                    'remove_exclusions',
+                    return_value=self.defender.DefenderResult(ok=False, error='stopped', error_code='service_inactive'),
+                ):
+                    w_inact()
+                self.assertFalse(h.defender_status_ok)
+                self.assertEqual(h.defender_status_msg, h.t('defender.msg.inactive'))
 
 
 class WindowsEngineBumpFollowUpTest(unittest.TestCase):
@@ -6931,6 +7217,346 @@ class WindowsEngineBumpFollowUpTest(unittest.TestCase):
         self.assertIn(('assign', 0x12340000ABCD, 0x55AA), calls)
         self.assertIn(('terminate', 0x12340000ABCD, 1), calls)
         self.assertIn(('close', 0x12340000ABCD), calls)
+
+
+class RomfsTrailerAndManifestArgsTests(unittest.TestCase):
+    """Tests for DMMSLTR1 64B trailer validation, custom *.img directory lookup, and manifest metadata flags."""
+
+    @staticmethod
+    def _make_dmromfs1_image(mask: str) -> bytes:
+        import struct
+        payload = mask.encode('utf-8')
+        data_off = 32
+        idx_off = data_off + len(payload)
+        names = b'SystemRegionLangMask.txt'
+        ent_struct = struct.Struct('<QQIHBB')
+        entries = (
+            ent_struct.pack(1, 1, 0, 0, 0, 0)
+            + ent_struct.pack(2, 1, 0, 6, 0, 0)
+            + ent_struct.pack(data_off, len(payload), 6, 18, 1, 0)
+        )
+        idx = entries + names
+        return struct.pack('<8sQQQ', b'DMROMFS1', idx_off, len(idx), 3) + payload + idx
+
+    @staticmethod
+    def _append_dmmsl_trailer(
+        base: bytes,
+        *,
+        gfx_api: int = 1,
+        flags: int = 0,
+        chain: str = 'b-d0e99bd4b2fe',
+        msl_size: int = 40,
+    ) -> bytes:
+        import struct
+        base_end = len(base)
+        msl_offset = (base_end + 16383) & ~16383
+        pad1 = b'\x00' * (msl_offset - base_end)
+        msl_payload = (b'DMROMFS1' + b'\x00' * max(0, msl_size - 8))[:msl_size]
+        raw_end = msl_offset + len(msl_payload)
+        aligned_end = (raw_end + 7) & ~7
+        pad2 = b'\x00' * (aligned_end - raw_end)
+        chain_bytes = chain.encode('utf-8')[:24]
+        footer = (
+            b'DMMSLTR1'
+            + struct.pack(
+                '<IBBHQQQ',
+                1,
+                gfx_api,
+                flags,
+                len(chain_bytes),
+                base_end,
+                msl_offset,
+                len(msl_payload),
+            )
+            + chain_bytes
+            + b'\x00' * (24 - len(chain_bytes))
+        )
+        assert len(footer) == 64
+        return base + pad1 + msl_payload + pad2 + footer
+
+    def test_romfs_languages_accepts_valid_dmmsltr1_trailers_and_refreshes_cache(self) -> None:
+        from nspb_qt import romfs_languages as rl
+
+        base = self._make_dmromfs1_image('JPja USen CNzh\n011\n')
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            nvn_bytes = self._append_dmmsl_trailer(base, gfx_api=1, flags=0, chain='b-d0e99bd4b2fe', msl_size=37)
+            nvn_img = root / 'nvn.img'
+            nvn_img.write_bytes(nvn_bytes)
+            self.assertEqual([o[0] for o in rl.options_in(nvn_img)], ['en-US', 'ja', 'zh-Hans'])
+
+            vk_img = root / 'vk.img'
+            vk_img.write_bytes(self._append_dmmsl_trailer(base, gfx_api=2, flags=0, chain='', msl_size=32))
+            self.assertEqual([o[0] for o in rl.options_in(vk_img)], ['en-US', 'ja', 'zh-Hans'])
+
+            gl_img = root / 'gl.img'
+            gl_img.write_bytes(
+                self._append_dmmsl_trailer(base, gfx_api=3, flags=1, chain='b-abcdef0123456789abcdef', msl_size=48)
+            )
+            self.assertEqual([o[0] for o in rl.options_in(gl_img)], ['en-US', 'ja', 'zh-Hans'])
+
+            # In-place upgrade refreshes (path, st_size, st_mtime_ns) cache and narrows launcher.json
+            upgrading = root / 'upgrading.img'
+            upgrading.write_bytes(nvn_bytes[:-1])
+            self.assertEqual(rl.options_in(upgrading), [])
+            upgrading.write_bytes(nvn_bytes)
+            self.assertEqual([o[0] for o in rl.options_in(upgrading)], ['en-US', 'ja', 'zh-Hans'])
+
+            launcher_json = root / 'launcher.json'
+            launcher_json.write_text(
+                json.dumps({
+                    'schema': 1,
+                    'game': '040074A01BF12000',
+                    'settings': [{
+                        'env': 'DM_LANG',
+                        'kind': 'choice',
+                        'section': 'Game',
+                        'label': 'Game language',
+                        'note': "This game's files do not list its languages.",
+                        'default': 'en-US',
+                        'level': 'basic',
+                        'options': [[code, label] for code, label in rl.TABLE],
+                    }],
+                }),
+                encoding='utf-8',
+            )
+            self.assertTrue(rl.apply_to_launcher_json(launcher_json, upgrading))
+            updated = json.loads(launcher_json.read_text(encoding='utf-8'))
+            self.assertEqual([o[0] for o in updated['settings'][0]['options']], ['en-US', 'ja', 'zh-Hans'])
+
+    def test_romfs_languages_rejects_corrupt_or_overflowing_dmmsltr1_trailers(self) -> None:
+        import struct
+        from nspb_qt import romfs_languages as rl
+
+        base = self._make_dmromfs1_image('USen JPja\n')
+        valid = bytearray(self._append_dmmsl_trailer(base, gfx_api=1, flags=0, chain='b-1234567890ab', msl_size=40))
+        foot = len(valid) - 64
+
+        def mut(patch_fn) -> bytes:
+            b = bytearray(valid)
+            patch_fn(b)
+            return bytes(b)
+
+        bad_cases = [
+            base + b'\x00' * 10,
+            base + b'\x00' * 63,
+            bytes(valid[:-1]),
+            bytes(valid[:16384 + 20]),
+            bytes(valid[:foot]) + b'\x00' * 8 + bytes(valid[foot:]),
+            mut(lambda b: b.__setitem__(foot + 7, ord('0'))),
+            mut(lambda b: struct.pack_into('<I', b, foot + 8, 2)),
+            mut(lambda b: b.__setitem__(foot + 12, 0)),
+            mut(lambda b: b.__setitem__(foot + 12, 4)),
+            mut(lambda b: b.__setitem__(foot + 12, 255)),
+            mut(lambda b: struct.pack_into('<Q', b, foot + 16, len(base) + 1)),
+            mut(lambda b: struct.pack_into('<Q', b, foot + 24, len(base))),
+            mut(lambda b: struct.pack_into('<Q', b, foot + 32, 31)),
+            mut(lambda b: struct.pack_into('<Q', b, foot + 32, (1 << 64) - 1)),
+            mut(lambda b: struct.pack_into('<H', b, foot + 14, 25)),
+            mut(lambda b: b.__setitem__(foot + 42, 0)),
+            mut(lambda b: b.__setitem__(foot + 63, ord('x'))),
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for idx, data in enumerate(bad_cases):
+                p = root / f'bad_trailer_{idx}.img'
+                p.write_bytes(data)
+                self.assertEqual(rl.options_in(p), [], f'case {idx} should be rejected')
+
+    def test_romfs_languages_directory_fallback_scans_sorted_custom_img_and_skips_parts_and_hidden(self) -> None:
+        from nspb_qt import romfs_languages as rl
+
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td) / 'custom_dir'
+            folder.mkdir()
+            wrong = self._make_dmromfs1_image('EUde EUit\n')
+            (folder / '.hidden.img').write_bytes(wrong)
+            (folder / '._星露谷物语.img').write_bytes(wrong)
+            (folder / '00_game.nxpart.img').write_bytes(wrong)
+            (folder / '00_game.img.nxpart.0000.0002').write_bytes(wrong)
+            (folder / '01_folder.img').mkdir()
+            (folder / '02_dlc.img').write_bytes(self._make_dmromfs1_image('USen\n'))
+
+            stardew = self._append_dmmsl_trailer(
+                self._make_dmromfs1_image('USen JPja CNzh\n'),
+                gfx_api=1,
+                flags=0,
+                chain='b-stardew12345',
+                msl_size=40,
+            )
+            (folder / 'a_星露谷物语.img').write_bytes(stardew)
+            (folder / 'b_空洞骑士.img').write_bytes(self._make_dmromfs1_image('USen EUfr\n'))
+
+            self.assertEqual([o[0] for o in rl.options_in(folder)], ['en-US', 'ja', 'zh-Hans'])
+
+            # Standard romfs.img takes precedence; when corrupt, do not fall back to sibling *.img files
+            (folder / 'romfs.img').write_bytes(b'corrupt')
+            self.assertEqual(rl.options_in(folder), [])
+
+    def test_build_manifest_args_includes_gfx_api_and_utc_built_at_and_main_wires_them(self) -> None:
+        import re
+        import time
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / 'engine'
+            patched = root / 'patched'
+            gd = root / 'gd'
+            patched.mkdir()
+            gd.mkdir()
+            out_manifest = root / 'game.manifest.json'
+
+            # 1. Default backwards-compatible call omits --gfx-api and --built-at
+            legacy_args = build_app.build_manifest_args(
+                repo=repo,
+                out_manifest=out_manifest,
+                game='0100000000010000',
+                name='Super Mario Odyssey',
+                version='1.3.0',
+                pkg='v0',
+                mods=['main'],
+                chain_ver='deadbeef',
+                marker='romfs/a.bin',
+                romfs_id='DMROMFSID1',
+                fw_name='DmGame0100000000010000',
+                patched=patched,
+                gd=gd,
+            )
+            self.assertNotIn('--gfx-api', legacy_args)
+            self.assertNotIn('--built-at', legacy_args)
+
+            # 2. Explicit gfx_api and built_at flags are forwarded verbatim
+            explicit_args = build_app.build_manifest_args(
+                repo=repo,
+                out_manifest=out_manifest,
+                game='0100000000010000',
+                name='Super Mario Odyssey',
+                version='1.3.0',
+                pkg='v0',
+                mods=['main'],
+                chain_ver='deadbeef',
+                marker='romfs/a.bin',
+                romfs_id='DMROMFSID1',
+                fw_name='DmGame0100000000010000',
+                patched=patched,
+                gd=gd,
+                gfx_api='vulkan',
+                built_at='2026-11-13T18:16:06Z',
+            )
+            idx_gfx = explicit_args.index('--gfx-api')
+            self.assertEqual(explicit_args[idx_gfx + 1], 'vulkan')
+            idx_built = explicit_args.index('--built-at')
+            self.assertEqual(explicit_args[idx_built + 1], '2026-11-13T18:16:06Z')
+
+            # 3. End-to-end call-chain check through build_app.main() in DM_FRAMEWORK_ONLY mode
+            (repo / 'dm/games/0100000000010000').mkdir(parents=True)
+            for fname in ('game.tsv', 'shader_map.tsv', 'pso_manifest.tsv'):
+                (repo / 'dm/games/0100000000010000' / fname).write_text('# stub\n', encoding='utf-8')
+            (repo / 'dm/games/game.py').write_text(
+                'from pathlib import Path\n'
+                'class _P:\n'
+                '    def __init__(self, d): self.dir = d\n'
+                '    def get(self, k, default=""):\n'
+                '        return {"package": "v0", "modules": "main", "romfs_marker": "a.bin", "ipa": "out.ipa"}.get(k, default)\n'
+                '    def modules_in(self, _p): return ["main"]\n'
+                'def load(_g): return _P(Path(__file__).resolve().parent / "0100000000010000")\n',
+                encoding='utf-8',
+            )
+            (repo / 'dm/gfx/nvn').mkdir(parents=True)
+            (repo / 'dm/gfx/nvn/dmsh_chain.h').write_text('#define DMSH_CHAIN "cafe1234"\n', encoding='utf-8')
+            (repo / 'dm/host').mkdir(parents=True)
+            (repo / 'dm/host/main.c').write_text('int main(void){return 0;}\n', encoding='utf-8')
+            for rel in (
+                'dm/ios/framework/DmGameMarker.m',
+                'dm/ios/framework/ShellGlue.m',
+                'dm/ios/Sources/front_ios.m',
+                'dm/ios/Sources/DmGamepad.m',
+                'dm/ios/Sources/CloudSaves.m',
+                'dm/ios/Sources/SaveSync.m',
+                'dm/ios/Sources/DataBookmark.m',
+            ):
+                p = repo / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text('// stub\n', encoding='utf-8')
+
+            w = root / 'work'
+            (w / 'build/patched_v0').mkdir(parents=True)
+            (w / 'build/patched_v0/main.patched.bin').write_bytes(b'\x00' * 16)
+            (w / 'build/patched_v0/main.fixups.tsv').write_text('', encoding='utf-8')
+            (w / 'data/v0/RomFS').mkdir(parents=True)
+            (w / 'build/ios/dmsh_b/vk').mkdir(parents=True)
+            (w / 'build/ios/dmsh_b/vk/vk_shaders.metallib').write_bytes(b'MTLB')
+            fw_out = root / 'fw_out'
+            sdk = make_fake_sdk(root)
+
+            captured_manifest_cmd: list[str] = []
+
+            def fake_py(*py_args, **_kw) -> str:
+                strs = [str(a) for a in py_args]
+                if strs[0].endswith('game.py') and strs[1] == 'header':
+                    Path(strs[3]).write_text('// profile\n', encoding='utf-8')
+                elif strs[0].endswith('gen_embed.py'):
+                    Path(strs[-2]).write_text('// embed\n', encoding='utf-8')
+                elif strs[0].endswith('settings.py'):
+                    Path(strs[4]).write_text('{"schema": 1, "settings": []}\n', encoding='utf-8')
+                elif strs[0].endswith('game.py') and strs[1] == 'profile':
+                    Path(strs[3]).write_text('', encoding='utf-8')
+                elif strs[0].endswith('gen_manifest.py'):
+                    captured_manifest_cmd.extend(strs)
+                    Path(strs[1]).write_text('{}\n', encoding='utf-8')
+                return ''
+
+            saved_path = list(sys.path)
+            saved_game_mod = sys.modules.pop('game', None)
+            fixed_utc = time.struct_time((2026, 11, 13, 18, 16, 6, 4, 317, 0))
+            env_patch = {
+                'NSPB_REPO': str(repo),
+                'GAME': '0100000000010000',
+                'W': str(w),
+                'DM_DISPLAY_NAME': 'Super Mario Odyssey',
+                'GFXAPI': 'vulkan',
+                'DM_FRAMEWORK_ONLY': str(fw_out),
+            }
+            try:
+                with (
+                    mock.patch.dict(os.environ, env_patch, clear=False),
+                    mock.patch.object(build_app, 'romfs_has', return_value=True),
+                    mock.patch.object(build_app, 'host_sources', return_value=([], [])),
+                    mock.patch.object(build_app, 'compat_rt_needed', return_value=False),
+                    mock.patch.object(build_app, 'compile_all', return_value=[]),
+                    mock.patch.object(build_app, 'link_framework', side_effect=lambda *_a, **_k: (fw_out / 'DmGame0100000000010000.framework' / 'DmGame0100000000010000').write_bytes(b'dylib')),
+                    mock.patch.object(build_app, 'py', side_effect=fake_py),
+                    mock.patch.object(build_app.tc, 'ios_sdk', return_value=sdk),
+                    mock.patch.object(build_app.tc, 'llvm_tool', return_value=root / 'clang.exe'),
+                    mock.patch.object(build_app.tc, 'ensure_ld64_lld', return_value=(root / 'ld64.lld.exe', '')),
+                    mock.patch.object(build_app.time, 'gmtime', return_value=fixed_utc),
+                ):
+                    rc = build_app.main([])
+            finally:
+                sys.path[:] = saved_path
+                sys.modules.pop('game', None)
+                if saved_game_mod is not None:
+                    sys.modules['game'] = saved_game_mod
+
+            self.assertEqual(rc, 0)
+            self.assertTrue(captured_manifest_cmd, 'main() did not invoke gen_manifest.py')
+            self.assertIn('--gfx-api', captured_manifest_cmd)
+            self.assertEqual(captured_manifest_cmd[captured_manifest_cmd.index('--gfx-api') + 1], 'vulkan')
+            self.assertIn('--built-at', captured_manifest_cmd)
+            built_val = captured_manifest_cmd[captured_manifest_cmd.index('--built-at') + 1]
+            self.assertEqual(built_val, '2026-11-13T18:16:06Z')
+            self.assertRegex(built_val, r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
+            # PR 2 strips msl/ from DmGame<ID>.framework and emits .msl-cache/<ID>.json metadata instead
+            self.assertFalse(
+                (fw_out / 'DmGame0100000000010000.framework' / 'msl').exists()
+            )
+            msl_cache_file = fw_out / '.msl-cache' / '0100000000010000.json'
+            self.assertTrue(msl_cache_file.is_file(), 'missing .msl-cache/0100000000010000.json')
+            msl_cache = json.loads(msl_cache_file.read_text(encoding='utf-8'))
+            self.assertEqual(msl_cache.get('schema'), 1)
+            self.assertEqual(msl_cache.get('gfx_api'), 'vulkan')
+            self.assertEqual(Path(msl_cache.get('msl_root', '')), w / 'build' / 'ios' / 'dmsh_b')
+            self.assertEqual(Path(msl_cache.get('lib_path', '')), w / 'build' / 'ios' / 'dmsh_b' / 'vk')
 
 
 if __name__ == '__main__':

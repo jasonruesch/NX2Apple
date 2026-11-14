@@ -73,12 +73,13 @@ package struct InstallCard: View {
                         }
                     }
                 }
-                if !build.builtShellGames().isEmpty {
+                let builtCount = build.builtShellGames().count
+                if builtCount > 0 {
                     CardDivider()
                     CardRow(loc.t("shell.builtTitle"), detail: loc.t("shell.installBuiltNote")) {
-                        Button(loc.t("shell.installBuilt")) { build.installBuiltGames() }
+                        Button(String(format: loc.t("shell.installBuilt"), builtCount)) { build.installBuiltGames() }
                             .buttonStyle(LauncherSecondaryButtonStyle())
-                            .disabled(!build.canInstallBuiltGames)
+                            .disabled(build.running || !build.installsDirectly || devices.exportIPA)
                             .help(loc.t("shell.installBuiltNote"))
                     }
                     if !build.sharedAppDataSources().isEmpty {
@@ -128,12 +129,6 @@ package struct InstallCard: View {
                 .autocorrectionDisabled()
                 .frame(width: ExportGrid.switchWidth)
                 .accessibilityLabel(loc.t("shared.ipaBundleID"))
-        }
-        CardDivider()
-        // The shaders are most of the IPA: with this on, every game's go with its game data in step 3, not only the large ones
-        CardRow(loc.t("shared.ipaShaders"), detail: loc.t(devices.ipaShadersWithData ? "shared.ipaShadersOnNote" : "shared.ipaShadersOffNote")) {
-            Toggle(loc.t("shared.ipaShaders"), isOn: $devices.ipaShadersWithData)
-                .toggleStyle(LauncherSwitchStyle()).labelsHidden()
         }
         CardDivider()
         // A signed IPA is built for the device it goes to, so Xcode registers that device with the team before the export

@@ -40,6 +40,8 @@ public struct CatalogueEntry: Equatable, Sendable, Identifiable {
     public var frameworkURL: URL?
     /// Set when the unsigned shared IPA externalized this framework's `msl/` shader tree alongside game data (#947).
     public var requiresExternalShaders: Bool = false
+    /// The app bundle's same-chain framework when a hot-pushed stripped framework overrides it.
+    public var fallbackBundledFrameworkURL: URL? = nil
 }
 
 /// Marker written last inside `Documents/Frameworks/.staging-<ID>-<token>/.ready` once every file of a hot-pushed
@@ -96,8 +98,8 @@ public enum GameCatalogue {
 
     /// Promotes completed `.staging-*` framework folders inside `hotRoot` into `hotRoot/DmGame<ID>.framework` atomically.
     /// Staging folders without `.ready` that are newer than `staleAge` stay untouched (a transfer may still be in flight).
-    public static func promoteStagedFrameworks(in hotRoot: URL, now: Date = Date(), staleAge: TimeInterval = 3600,
-                                               fileManager fm: FileManager = .default) {
+    public static func promoteStagedFrameworks(in hotRoot: URL, gameDataRoot: URL? = nil, now: Date = Date(),
+                                               staleAge: TimeInterval = 3600, fileManager fm: FileManager = .default) {
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: hotRoot.path, isDirectory: &isDir), isDir.boolValue else { return }
         let items = (try? fm.contentsOfDirectory(atPath: hotRoot.path)) ?? []
@@ -176,7 +178,12 @@ public enum GameCatalogue {
                 if let backup { try? fm.moveItem(at: backup, to: target) }
                 continue
             }
-            if let backup { try? fm.removeItem(at: backup) }
+            if let backup {
+                if let gameDataRoot {
+                    rescueShaders(from: backup, promotedFramework: target, manifest: manifest, gameDataRoot: gameDataRoot, fm: fm)
+                }
+                try? fm.removeItem(at: backup)
+            }
             try? fm.removeItem(at: staging.url)
             promotedTitles.insert(manifest.titleID.uppercased())
         }
@@ -187,6 +194,34 @@ public enum GameCatalogue {
             if expired || superseded {
                 discardFolder(item.url, in: hotRoot, fm: fm)
             }
+        }
+    }
+
+    /// Zero-copy rescues `backup/msl` into `<gameDataRoot>/<titleID>/msl` when replacing an older same-chain hot framework
+    /// that carried `msl/` with a stripped framework that has none. Never throws or blocks promotion on failure.
+    private static func rescueShaders(from backup: URL, promotedFramework: URL, manifest: GameManifest,
+                                      gameDataRoot: URL, fm: FileManager) {
+        var isOldMSLDir: ObjCBool = false
+        let oldMSL = backup.appendingPathComponent("msl", isDirectory: true)
+        guard fm.fileExists(atPath: oldMSL.path, isDirectory: &isOldMSLDir), isOldMSLDir.boolValue else { return }
+        let newMSL = promotedFramework.appendingPathComponent("msl", isDirectory: true)
+        guard !fm.fileExists(atPath: newMSL.path),
+              (try? fm.attributesOfItem(atPath: newMSL.path)) == nil else { return }
+        guard let oldManifestData = fm.contents(atPath: backup.appendingPathComponent("game.manifest.json").path),
+              let oldManifest = try? GameManifest.parse(oldManifestData),
+              oldManifest.titleID.caseInsensitiveCompare(manifest.titleID) == .orderedSame,
+              oldManifest.chain == manifest.chain else { return }
+        let gameDir = DataLocator.titleFolders(in: gameDataRoot, titleID: manifest.titleID, fm).first
+            ?? gameDataRoot.appendingPathComponent(manifest.titleID, isDirectory: true)
+        let destMSL = gameDir.appendingPathComponent("msl", isDirectory: true)
+        guard !fm.fileExists(atPath: destMSL.path),
+              (try? fm.attributesOfItem(atPath: destMSL.path)) == nil else { return }
+        do {
+            try fm.createDirectory(at: gameDir, withIntermediateDirectories: true)
+            try fm.moveItem(at: oldMSL, to: destMSL)
+            BackupExclusion.exclude(destMSL)
+        } catch {
+            // Best-effort rescue: never block atomic framework promotion.
         }
     }
 
@@ -205,10 +240,10 @@ public enum GameCatalogue {
         }
     }
 
-    public static func scan(root: URL, hotRoot: URL? = nil, fileManager fm: FileManager = .default) -> [CatalogueEntry] {
+    public static func scan(root: URL, hotRoot: URL? = nil, gameDataRoot: URL? = nil, fileManager fm: FileManager = .default) -> [CatalogueEntry] {
         var entries = scanSingleRoot(root, fileManager: fm)
         if let hotRoot {
-            promoteStagedFrameworks(in: hotRoot, fileManager: fm)
+            promoteStagedFrameworks(in: hotRoot, gameDataRoot: gameDataRoot, fileManager: fm)
             let hotEntries = scanSingleRoot(hotRoot, fileManager: fm).filter { $0.directory.pathExtension == "framework" }
             for hot in hotEntries {
                 if let idx = entries.firstIndex(where: { $0.id.caseInsensitiveCompare(hot.id) == .orderedSame }) {
@@ -222,19 +257,50 @@ public enum GameCatalogue {
                         continue
                     }
                     if bundled.problem == nil,
-                       let bundledBuilt = bundled.manifest?.builtAt, !bundledBuilt.isEmpty,
-                       let hotBuilt = hot.manifest?.builtAt, !hotBuilt.isEmpty,
-                       bundledBuilt >= hotBuilt {
+                       shouldDiscardStaleHotFramework(bundled: bundled, hot: hot, fileManager: fm) {
                         discardFolder(hot.directory, in: hotRoot, fm: fm)
                         continue
                     }
-                    entries[idx] = hot
+                    var hotEntry = hot
+                    if bundled.problem == nil,
+                       hot.problem == nil,
+                       bundled.manifest?.chain == hot.manifest?.chain {
+                        hotEntry.fallbackBundledFrameworkURL = bundled.frameworkURL
+                    }
+                    entries[idx] = hotEntry
                 } else {
                     entries.append(hot)
                 }
             }
         }
         return entries.sorted { ($0.manifest?.name ?? "\u{10FFFF}\($0.id)").localizedCaseInsensitiveCompare($1.manifest?.name ?? "\u{10FFFF}\($1.id)") == .orderedAscending }
+    }
+
+    /// True when the bundled framework is at least as fresh as the hot-pushed copy under `Documents/Frameworks`.
+    /// When both carries `built_at`, compare timestamps strictly so a re-signed older IPA keeps a newer hot build;
+    /// when a legacy bundled `.framework` lacks `built_at`, fall back to strictly newer executable/manifest mtime.
+    public static func shouldDiscardStaleHotFramework(bundled: CatalogueEntry, hot: CatalogueEntry, fileManager fm: FileManager = .default) -> Bool {
+        if let bundledBuilt = bundled.manifest?.builtAt, !bundledBuilt.isEmpty,
+           let hotBuilt = hot.manifest?.builtAt, !hotBuilt.isEmpty {
+            return bundledBuilt >= hotBuilt
+        }
+        guard bundled.directory.pathExtension == "framework",
+              let bundledDate = frameworkModificationDate(bundled, fileManager: fm),
+              let hotDate = frameworkModificationDate(hot, fileManager: fm) else {
+            return false
+        }
+        return bundledDate > hotDate
+    }
+
+    private static func frameworkModificationDate(_ entry: CatalogueEntry, fileManager fm: FileManager) -> Date? {
+        if let executable = entry.manifest?.frameworkExecutable, !executable.isEmpty {
+            let exeURL = entry.directory.appendingPathComponent(executable)
+            if let date = (try? fm.attributesOfItem(atPath: exeURL.path))?[.modificationDate] as? Date {
+                return date
+            }
+        }
+        let manifestURL = entry.directory.appendingPathComponent("game.manifest.json")
+        return (try? fm.attributesOfItem(atPath: manifestURL.path))?[.modificationDate] as? Date
     }
 
     private static func scanSingleRoot(_ root: URL, fileManager fm: FileManager) -> [CatalogueEntry] {
@@ -426,7 +492,7 @@ public enum DataLocator {
         }
         switch global {   // the shell-level data folder: the game's own bookmark wins, this backs it up
         case .url(let url):
-            if let match = shellMatch, select(match, source: .shell) { return result }
+            if let match = shellMatch, select(match, source: .shell, allowFile: true) { return result }
             for titleFolder in titleFolders(in: url, titleID: manifest.titleID, fm) where select(titleFolder, source: .shell) {
                 return result
             }
@@ -459,15 +525,21 @@ public enum DataLocator {
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else { return nil }
         if !isDir.boolValue {
-            guard allowPickedFile, url.pathExtension.lowercased() == "img", isComplete(url, manifest: manifest, fm), acceptsImage(url)
+            guard allowPickedFile, RomfsImageName.isNonPartImage(url.lastPathComponent), isComplete(url, manifest: manifest, fm), acceptsImage(url)
             else { return nil }
             return (url.deletingLastPathComponent(), url)
         }
         let canonicalImage = url.appendingPathComponent("romfs.img")
         if isComplete(canonicalImage, manifest: manifest, fm), acceptsImage(canonicalImage) { return (url, canonicalImage) }
-        let names = ((try? fm.contentsOfDirectory(atPath: url.path)) ?? []).filter { $0 != "romfs.img" && $0.lowercased() == "romfs.img" }
-        for name in names.sorted() {
+        let entries = ((try? fm.contentsOfDirectory(atPath: url.path)) ?? []).sorted()
+        for name in entries where name != "romfs.img" && name.lowercased() == "romfs.img" {
             let image = url.appendingPathComponent(name)
+            if isComplete(image, manifest: manifest, fm), acceptsImage(image) { return (url, image) }
+        }
+        for name in entries where name.lowercased() != "romfs.img" && RomfsImageName.isNonPartImage(name) {
+            let image = url.appendingPathComponent(name)
+            guard let attrs = try? fm.attributesOfItem(atPath: image.path),
+                  attrs[.type] as? FileAttributeType == .typeRegular else { continue }
             if isComplete(image, manifest: manifest, fm), acceptsImage(image) { return (url, image) }
         }
         for tree in [url.appendingPathComponent("romfs", isDirectory: true), url]
@@ -475,13 +547,20 @@ public enum DataLocator {
         return nil
     }
 
-    /// A non-empty image, and when the manifest names the image it was built for (`romfs_identity`, `size=<bytes>`), exactly that
-    /// size: a copy cut off partway (the device locked or was unplugged during the Mac launcher's copy) is not game data yet.
+    /// A non-empty image, and when the manifest names the image it was built for (`romfs_identity`, `size=<bytes>`), either that
+    /// exact base size or a larger image ending with a valid `DMMSLTR1` trailer whose `baseRomfsSize` matches: a copy cut off
+    /// partway or carrying trailing garbage is not game data.
     static func isComplete(_ url: URL, manifest: GameManifest, _ fm: FileManager) -> Bool {
         guard let attributes = try? fm.attributesOfItem(atPath: url.path),
               attributes[.type] as? FileAttributeType != .typeDirectory,
               let size = (attributes[.size] as? NSNumber)?.int64Value, size > 0 else { return false }
-        return expectedImageSize(manifest).map { $0 == size } ?? true
+        guard let want = expectedImageSize(manifest) else { return true }
+        guard want > 0 else { return false }
+        if size == want { return true }
+        if size > want {
+            return RomfsTrailer.inspect(at: url)?.baseRomfsSize == UInt64(want)
+        }
+        return false
     }
 
     /// `size=<bytes>` of the manifest's `romfs_identity` line (`DMROMFSID1 title=… size=… index=…`), nil without one.

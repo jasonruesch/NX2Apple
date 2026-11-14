@@ -28,10 +28,8 @@ package enum SendWhere {
     nonisolated package static let oneGameKey = "exportOneGame"
     nonisolated package static let sendWhereKey = "sendWhere"
     nonisolated package static let driveFolderKey = "driveFolder"
-    nonisolated package static let driveNamedFoldersKey = "driveNamedFolders"
     nonisolated package static let ipaTeamKey = "ipaTeam"
     nonisolated package static let ipaBundleIDKey = "ipaBundleID"
-    nonisolated package static let ipaShadersWithDataKey = "ipaShadersWithData"
 
     @Published package var devices: [AppleDevice] = []
     @Published package var teams: [SigningTeam] = []
@@ -61,11 +59,6 @@ package enum SendWhere {
     @Published package var driveFolder: String {
         didSet { defaults.set(driveFolder, forKey: Self.driveFolderKey) }
     }
-    /// The drive copy names each game's folder after the game, `<game name> (<title ID>)`, instead of the title ID. Off until the
-    /// player turns it on, saved when it changes.
-    @Published package var driveNamedFolders: Bool {
-        didSet { defaults.set(driveNamedFolders, forKey: Self.driveNamedFoldersKey) }
-    }
     /// The team the shared app's IPA is signed for. Empty: the IPA is unsigned, for a sideloading tool to sign. Saved when it changes.
     @Published package var ipaTeam: String {
         didSet { defaults.set(ipaTeam, forKey: Self.ipaTeamKey) }
@@ -73,10 +66,6 @@ package enum SendWhere {
     /// The bundle ID the shared app's IPA gets. Empty: the one shell.json holds. Saved when it changes.
     @Published package var ipaBundleID: String {
         didSet { defaults.set(ipaBundleID, forKey: Self.ipaBundleIDKey) }
-    }
-    /// Every game's shaders leave the shared app's IPA and go with its game data (step 3), not only the sets over 64 MB.
-    @Published package var ipaShadersWithData: Bool {
-        didSet { defaults.set(ipaShadersWithData, forKey: Self.ipaShadersWithDataKey) }
     }
     /// The shared app's copy question: the size and the connection (nil: none is up).
     @Published package private(set) var shellCopy: ShellCopyPlan?
@@ -110,10 +99,8 @@ package enum SendWhere {
         self.exportOneGame = defaults.bool(forKey: Self.oneGameKey)
         self.sendWhere = defaults.string(forKey: Self.sendWhereKey) ?? SendWhere.device
         self.driveFolder = defaults.string(forKey: Self.driveFolderKey) ?? ""
-        self.driveNamedFolders = defaults.bool(forKey: Self.driveNamedFoldersKey)
         self.ipaTeam = defaults.string(forKey: Self.ipaTeamKey) ?? ""
         self.ipaBundleID = defaults.string(forKey: Self.ipaBundleIDKey) ?? ""
-        self.ipaShadersWithData = defaults.bool(forKey: Self.ipaShadersWithDataKey)
     }
 
     /// A device's name for a message, "iPhone" when this Mac has not listed it.
