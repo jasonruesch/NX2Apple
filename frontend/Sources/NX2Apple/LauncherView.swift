@@ -246,9 +246,14 @@ struct LauncherView: View {
             }
             refreshArtwork()
             readSignatures()
-            m.sharedAppDataSources = { [library] in   // the games with packed data, for Send all game data (#1036)
-                library.games.filter { !$0.archivePath.isEmpty && FileManager.default.fileExists(atPath: $0.archivePath) }
-                    .map { TransferSource(titleID: $0.titleID, name: $0.name, archive: $0.archivePath) }
+            m.sharedAppDataSources = { [library, devices = stores.deviceStore] in   // the games with packed data, for Send all game data (#1036)
+                // A game whose packed data left this Mac for the drive folder sends and copies from there (DriveDataSource)
+                library.games.compactMap { game in
+                    let local = !game.archivePath.isEmpty && FileManager.default.fileExists(atPath: game.archivePath)
+                    let archive = local ? game.archivePath
+                        : DriveDataSource.folder(in: devices.driveFolder, titleID: game.titleID, named: devices.driveNamedFolders)
+                    return archive.map { TransferSource(titleID: game.titleID, name: game.name, archive: $0) }
+                }
             }
             m.macFallbackIconArguments = { [library] titleID in   // the engine takes it only for a game without an icon of its own (#784)
                 let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("NX2Apple/fallback-icons", isDirectory: true)
