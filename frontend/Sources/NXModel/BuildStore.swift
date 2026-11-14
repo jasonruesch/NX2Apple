@@ -231,7 +231,9 @@ func hop(_ body: @escaping @MainActor () -> Void) {
     // folder (romfs.img, aoc/) into its Documents, as a sideloaded copy has it. Without a device or a team the build stays an unsigned IPA, as before.
     @Published package var installedOn = ""       // the device the last build went to (its UDID)
     @Published package var installedAppPath = ""  // the signed app that went there
-    @Published package var exportedIPAPath = ""   // the unsigned IPA of an export (#416)
+    @Published package var exportedIPAPath = "" {  // the unsigned IPA of an export (#416)
+        didSet { if exportedIPAPath != oldValue { rememberExport() } }   // BuildStore+LastExport.swift
+    }
     @Published package var send: DataSend = .idle {  // step 3 of the export: the game data on its way (BuildStore+Send.swift)
         didSet { if send != oldValue { finderShown = false } }
     }
@@ -365,6 +367,7 @@ func hop(_ body: @escaping @MainActor () -> Void) {
         experimentalBuilder = ExperimentalBuilder.featureEnabled && defaults.bool(forKey: Self.experimentalBuilderKey)
         experimentalBuilderPath = defaults.string(forKey: Self.experimentalBuilderPathKey) ?? ""
         savedKeys = defaults.string(forKey: Self.savedKeysKey) ?? ""
+        restoreLastExport()
     }
 
     /// The language and the text this store writes itself: views take strings from the environment.

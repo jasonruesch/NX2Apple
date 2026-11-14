@@ -33,7 +33,8 @@ extension BuildStore {
         running = true; done = false; doneNote = ""; stages = []; log.clear(); staleShadersMessageKey = nil
         failure = nil; confirmingOverride = nil
         let override = takeOverrideFlag()   // for this build only: the next one asks again
-        installedOn = ""; installedAppPath = ""; exportedIPAPath = ""; send = .idle
+        installedOn = ""; installedAppPath = ""; send = .idle
+        if !buildKeepsExport { exportedIPAPath = "" }   // BuildStore+LastExport.swift
         guard repo.isRepo else {
             fail(repo.path.isEmpty ? t("msg.repoInvalidEmpty") : String(format: t("msg.repoInvalid"), shortPath(repo.path)))
             return

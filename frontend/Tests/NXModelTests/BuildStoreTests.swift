@@ -38,6 +38,7 @@ import XCTest
         var driveFolder = ""
         var driveNamedFolders = false
         var ipaShadersWithData = false
+        var ipaTeam = ""
         var devices: [AppleDevice] = []
         var xcrun = "/usr/bin/true"
         var readTeams: @Sendable () -> [SigningTeam] = { [] }
@@ -82,6 +83,54 @@ import XCTest
         devices.exportOneGame = true
         XCTAssertFalse(store.makeInstaller().exportAllShadersOut, "one game's own IPA holds its data and its shaders")
         devices.exportOneGame = false; devices.ipaShadersWithData = false
+    }
+
+    func testTheLastExportComesBackWhenTheLauncherStartsAgain() throws {
+        defer { devices.ipaTeam = ""; devices.exportOneGame = false }
+        devices.ipaTeam = "TEAM123456"
+        let ipa = try file("NX2Apple.ipa")
+        makeStore().exportedIPAPath = ipa
+        XCTAssertEqual(makeStore().exportedIPAPath, ipa)
+
+        devices.ipaTeam = "OTHERTEAM1"
+        XCTAssertEqual(makeStore().exportedIPAPath, "", "an IPA for another team is not the one the settings make")
+        devices.ipaTeam = "TEAM123456"
+        XCTAssertEqual(makeStore().exportedIPAPath, "", "and it is forgotten")
+
+        makeStore().exportedIPAPath = ipa
+        devices.exportOneGame = true
+        XCTAssertEqual(makeStore().exportedIPAPath, "", "the other kind of IPA")
+        devices.exportOneGame = false
+
+        makeStore().exportedIPAPath = ipa
+        try FileManager.default.removeItem(atPath: ipa)
+        XCTAssertEqual(makeStore().exportedIPAPath, "", "an IPA that is gone")
+
+        let cleared = makeStore()
+        cleared.exportedIPAPath = try file("NX2Apple.ipa")
+        cleared.exportedIPAPath = ""
+        XCTAssertEqual(makeStore().exportedIPAPath, "")
+    }
+
+    func testABuildKeepsOnlyASharedIPASignedForATeam() throws {
+        defer { devices.ipaTeam = ""; devices.exportOneGame = false }
+        let store = makeStore()
+        XCTAssertFalse(store.buildKeepsExport, "no export")
+        store.exportedIPAPath = try file("NX2Apple.ipa")
+        XCTAssertFalse(store.buildKeepsExport, "an unsigned IPA plays only the games inside it")
+
+        devices.ipaTeam = "TEAM123456"
+        store.exportedIPAPath = ""
+        store.exportedIPAPath = try file("NX2Apple.ipa")
+        XCTAssertTrue(store.buildKeepsExport, "a signed shared IPA loads a new game's code from its game data")
+        devices.ipaTeam = "OTHERTEAM1"
+        XCTAssertFalse(store.buildKeepsExport)
+
+        devices.ipaTeam = "TEAM123456"
+        devices.exportOneGame = true
+        store.exportedIPAPath = ""
+        store.exportedIPAPath = try file("Game.ipa")
+        XCTAssertFalse(store.buildKeepsExport, "one game's own IPA")
     }
 
     private func file(_ name: String) throws -> String {
