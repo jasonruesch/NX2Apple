@@ -53,13 +53,13 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# 1. Game Update Catalog (48 TitleIDs synced with CHANGELOG.md & Swift)
+# 1. Game Update Catalog (56 TitleIDs synced with CHANGELOG.md & Swift)
 # ---------------------------------------------------------------------------
 
 DEFAULT_CATALOG_VERSION = '1.2.0'
 
 GAME_UPDATED_VERSIONS: dict[str, str] = {
-    # 1.5.0 (18 games)
+    # 1.5.0 (27 games)
     '0100152000022000': '1.5.0',
     '01001B300B9BE000': '1.5.0',
     '010049900F546000': '1.5.0',
@@ -68,17 +68,26 @@ GAME_UPDATED_VERSIONS: dict[str, str] = {
     '01006F8002326000': '1.5.0',
     '0100726014352000': '1.5.0',
     '01007820196A6000': '1.5.0',
+    '01007A2027548000': '1.5.0',
     '0100A00019DE0000': '1.5.0',
     '0100A5C00D162000': '1.5.0',
     '0100B99019412000': '1.5.0',
+    '0100C49025D3E000': '1.5.0',
+    '0100C510166F0000': '1.5.0',
+    '0100C9C00E25C000': '1.5.0',
     '0100F2C0115B6000': '1.5.0',
+    '040032B023CA4000': '1.5.0',
     '0400380020056000': '1.5.0',
+    '040041E0212AE000': '1.5.0',
     '0400486024DEC000': '1.5.0',
+    '0400569027BF4000': '1.5.0',
     '040074A01BF12000': '1.5.0',
     '04008E001F098000': '1.5.0',
+    '0400921025B32000': '1.5.0',
     '0400C3F00006E000': '1.5.0',
+    '0400C76024710000': '1.5.0',
     '0400D4201C6EA000': '1.5.0',
-    # 1.4.0 (19 games)
+    # 1.4.0 (18 games)
     '010012101468C000': '1.4.0',
     '010014C011146000': '1.4.0',
     '010019A01E2F2000': '1.4.0',
@@ -97,7 +106,6 @@ GAME_UPDATED_VERSIONS: dict[str, str] = {
     '0100B8E016F76000': '1.4.0',
     '0100CE4010AAC000': '1.4.0',
     '0100DA801624E000': '1.4.0',
-    '0400C76024710000': '1.4.0',
     # 1.3.0 (8 games)
     '0100276009872000': '1.3.0',
     '010035F022078000': '1.3.0',
@@ -660,6 +668,7 @@ class GameRefreshAssessment:
     can_fast_ios: bool
     needs_img_guide_ios: bool
     missing_original_package: bool
+    has_usable_seed: bool = False
     expected_romfs_identity: str | None = None
 
     @property
@@ -785,9 +794,11 @@ def detect_built_game_older(
 
     if game.built_chain_tag:
         tag = game.built_chain_tag.strip()
-        if cur_chain and tag.startswith('b-') and tag != cur_chain:
-            return True, ''
-        if cur_commit and not tag.startswith('b-'):
+        tag_low = tag.lower()
+        if tag_low.startswith('b-'):
+            if cur_chain and tag_low[2:] != cur_chain.strip().lower():
+                return True, ''
+        elif cur_commit:
             expected_tag = f'{cur_commit}+{cur_patches}' if cur_patches else cur_commit
             if tag != expected_tag:
                 built_commit = tag.split('+', 1)[0]
@@ -812,6 +823,7 @@ def detect_built_game_older(
                 pass
 
     tid = (game.title_id or '').strip().upper()
+    matched_fw = False
     if game.is_ready_for_ios and shell_cache_path:
         fw_cands = [
             Path(shell_cache_path, 'frameworks', f'DmGame{tid}.framework', 'game.manifest.json'),
@@ -819,18 +831,24 @@ def detect_built_game_older(
         for mp in fw_cands:
             if not mp.is_file():
                 continue
+            matched_fw = True
             try:
                 mdata = json.loads(mp.read_text(encoding='utf-8'))
             except Exception:
                 continue
             if not isinstance(mdata, dict):
                 continue
-            fw_chain = str(mdata.get('chain') or '').strip()
+            # Match Swift OlderTools.swift: skip chain checks for Vulkan/GL builds.
+            gfx_api = str(mdata.get('gfx_api') or '').strip().lower()
+            if gfx_api in ('vulkan', 'gl'):
+                continue
+            fw_chain_raw = str(mdata.get('chain') or '').strip().lower()
+            fw_chain = fw_chain_raw[2:] if fw_chain_raw.startswith('b-') else fw_chain_raw
             fw_commit = str(mdata.get('commit') or mdata.get('nxnative_commit') or '').strip()
             fw_patches = str(mdata.get('fork_patches') or '').strip()
             if fw_commit:
                 built_commit = fw_commit
-            if cur_chain and fw_chain and fw_chain != cur_chain:
+            if cur_chain and fw_chain and fw_chain != cur_chain.strip().lower():
                 return True, built_commit
             if cur_commit and fw_commit:
                 if '+dirty' in fw_commit or '+dirty' in cur_commit:
@@ -839,6 +857,23 @@ def detect_built_game_older(
                     return True, built_commit
                 if fw_patches and fw_patches != cur_patches:
                     return True, built_commit
+
+    # Standalone single-game iOS bundle (e.g. DmIOS.app): check Info.plist DMChain when no shared framework manifest matched.
+    if not matched_fw and game.has_ios_app:
+        ios_bn = os.path.basename(game.ios_app_path.rstrip('/\\')).lower()
+        if ios_bn != 'dmshell.app' and not ios_bn.endswith('.framework'):
+            ios_plist = Path(game.ios_app_path, 'Info.plist')
+            if ios_plist.is_file():
+                try:
+                    with open(ios_plist, 'rb') as f:
+                        pl = plistlib.load(f)
+                    if isinstance(pl, dict):
+                        dm_chain_raw = str(pl.get('DMChain') or '').strip().lower()
+                        dm_chain = dm_chain_raw[2:] if dm_chain_raw.startswith('b-') else dm_chain_raw
+                        if cur_chain and dm_chain and dm_chain != cur_chain.strip().lower():
+                            return True, built_commit
+                except Exception:
+                    pass
 
     return False, built_commit
 
@@ -972,6 +1007,7 @@ def assess_game_refresh(
             can_fast_ios=False,
             needs_img_guide_ios=False,
             missing_original_package=missing_pkg,
+            has_usable_seed=False,
             expected_romfs_identity=None,
         )
 
@@ -1083,6 +1119,7 @@ def assess_game_refresh(
         can_fast_ios=can_fast_ios,
         needs_img_guide_ios=needs_img_guide_ios,
         missing_original_package=missing_pkg,
+        has_usable_seed=bool(seed_usable),
         expected_romfs_identity=exp_identity,
     )
 
@@ -1831,6 +1868,8 @@ if HAS_QT:
             keys_in = (g.inputs.get('keys') or [''])[0] or getattr(self.m, 'keys_path', '')
 
             show_missing_note = False
+            disabled_mac = False
+            disabled_ios = False
             for target, can_fast in plats:
                 plat_name = (
                     self.m.t('batchRefresh.platformMac')
@@ -1843,6 +1882,10 @@ if HAS_QT:
                     cb.setChecked(False)
                     cb.setEnabled(False)
                     show_missing_note = True
+                    if target == 'mac-app':
+                        disabled_mac = True
+                    else:
+                        disabled_ios = True
                 else:
                     default_checked = can_fast or a.has_specific_update
                     cb.setChecked(default_checked)
@@ -1863,14 +1906,20 @@ if HAS_QT:
                 self._checkboxes.append((cb, q_item, is_fast_group))
                 plat_row.addWidget(cb)
 
-            if show_missing_note:
-                miss_lbl = QLabel(self.m.t('batchRefresh.missingPackage'))
-                miss_lbl.setObjectName('muted')
-                _apply_text_color(miss_lbl, '#ffbd38')
-                plat_row.addWidget(miss_lbl)
-
             plat_row.addStretch(1)
             lay.addLayout(plat_row)
+
+            if show_missing_note:
+                miss_key = (
+                    'batchRefresh.missingImg'
+                    if (not disabled_mac and disabled_ios and a.has_usable_seed and a.needs_img_guide_ios)
+                    else 'batchRefresh.missingPackage'
+                )
+                miss_lbl = QLabel(self.m.t(miss_key))
+                miss_lbl.setObjectName('muted')
+                miss_lbl.setWordWrap(True)
+                _apply_text_color(miss_lbl, '#ffbd38')
+                lay.addWidget(miss_lbl)
             return card
 
         def _update_summary(self) -> None:

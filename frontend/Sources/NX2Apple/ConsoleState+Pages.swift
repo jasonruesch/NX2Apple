@@ -95,6 +95,8 @@ struct ConsoleBuilds: Equatable {
     struct StageRow: Equatable, Identifiable {
         var id: Int
         var name: String
+        var nameKey: String? = nil
+        var nameArgument: String? = nil
         var state: StepState
         /// The share of this stage, 0 to 1, when the stage reports one.
         var progress: Double?
@@ -187,7 +189,7 @@ extension ConsoleState {
         guard !needle.isEmpty else { return supportedGames }
         return supportedGames.filter { game in
             let ownedTitle = ownedGameID(game).flatMap { id in games.first { $0.id == id }?.title } ?? ""
-            return [game.name, game.titleID, ownedTitle].contains { $0.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+            return SupportedGamesSheet.matchesSearch(game, needle: needle, ownedName: ownedTitle)
         }
     }
     /// The library's game for a supported game the player owns.

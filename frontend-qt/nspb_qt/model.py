@@ -840,6 +840,11 @@ class Model(QObject):
             else:
                 self.dotnet_path, self.dotnet_ok = 'dotnet', False
 
+        p = by_id.get('vcredist')
+        if p:
+            out.append(Dep('vcredist', 'dep.vcredist', 'dep.vcredist.hint', state(p),
+                           (p.path or 'ok') if p.ok else (p.detail or '')))
+
         # LLVM (+ the Mach-O linker, which comes from the same folder)
         p = by_id.get('llvm')
         if p:
@@ -1375,6 +1380,8 @@ class Model(QObject):
                     msg = self.t('defender.msg.cancelled')
                 else:
                     self.defender_status_ok = False
+                    if getattr(res, 'error_code', '') == 'service_inactive':
+                        self.settings_set('defenderPromptDismissed', True)
                     msg = self._defender_failure_message(res)
                 self.defender_status_msg = msg
             self.log(msg + '\n')
@@ -2465,10 +2472,12 @@ class Model(QObject):
 
         if total_in >= 0x400:
             factor = 3.5 if has_compressed else 2.2
-            needed = int(total_in * factor)
             probe_dir = self.out_dir or (
                 self.game_folder.folder if self.game_folder is not None else str(Path(self.base_path).parent)
             )
+            # A build again into the same folder keeps the game files it extracted before
+            reused = lib.BuildFolder.finished_extraction(str(Path(probe_dir, f'{self.build_key}_build')))
+            needed = max(0, int(total_in * factor) - reused)
             free = lib.DriveCopy.free_space(probe_dir)
             if free > 0 and free < needed:
                 return self.t('status.lowDiskSpace', lib.format_bytes(needed), lib.format_bytes(free))
@@ -3265,6 +3274,10 @@ class Model(QObject):
             return self.t('fail.psoDiskFull.whatNeeds', f.detail)
         if f.kind == bf.APP_ID_LIMIT and f.detail:
             return self.t('fail.appIDLimit.whatUntil', f.detail)
+        if f.kind == bf.WIN_PREREQ and f.detail:
+            return self.t('fail.winPrereq.whatNamed', f.detail)
+        if f.kind == bf.NO_IOS_SHADERS and f.detail:
+            return self.t('fail.noIOSShaders.whatDetail', f.detail)
         return self.t(f.what_key)
 
     def _keys_readable(self) -> bool | None:

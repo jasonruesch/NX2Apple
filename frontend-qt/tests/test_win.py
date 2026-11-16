@@ -361,9 +361,47 @@ class MetalArgsTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn('linker unavailable', detail)
 
-    def test_metal_tt_has_no_windows_tool(self) -> None:
-        # the pipeline archive is disabled here, and the caller relies on this being None
-        self.assertIsNone(tc.metal_tool('metal-tt'))
+    def test_metal_tt_none_when_absent(self) -> None:
+        # The caller relies on None when the tool is absent. Some Windows Metal builds do ship
+        # metal-tt.exe (32023.850), so this must not assert it is never there.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / 'bin').mkdir()
+            (root / 'bin/metal.exe').write_bytes(b'x')
+            with mock.patch.object(tc, 'metal_dir', return_value=root):
+                self.assertIsNone(tc.metal_tool('metal-tt'))
+
+    def test_metal_tt_found_when_shipped(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / 'bin').mkdir()
+            (root / 'bin/metal-tt.exe').write_bytes(b'x')
+            with mock.patch.object(tc, 'metal_dir', return_value=root):
+                self.assertEqual(tc.metal_tool('metal-tt'), root / 'bin/metal-tt.exe')
+
+    def test_xcrun_metal_tt_resolves_to_the_shipped_tool(self) -> None:
+        # find() returned None for metal-tt unconditionally, so `xcrun -sdk iphoneos metal-tt`
+        # exited 127 on a Metal build that ships it and the offline pipeline archive was skipped
+        # on a machine that can run it. It must resolve to the tool metal_tool finds.
+        from nspb_qt.win import xcrun_shim
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / 'bin').mkdir()
+            exe = root / 'bin/metal-tt.exe'
+            exe.write_bytes(b'x')
+            with mock.patch.object(tc, 'metal_dir', return_value=root):
+                self.assertEqual(xcrun_shim.find('iphoneos', 'metal-tt'), exe)
+
+    def test_xcrun_metal_tt_is_none_when_the_build_does_not_ship_it(self) -> None:
+        # The other half: absent still means None, which is what exits 127 naming the tool and
+        # what switches the pipeline archive off, rather than a half-written archive.
+        from nspb_qt.win import xcrun_shim
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / 'bin').mkdir()
+            (root / 'bin/metal.exe').write_bytes(b'x')
+            with mock.patch.object(tc, 'metal_dir', return_value=root):
+                self.assertIsNone(xcrun_shim.find('iphoneos', 'metal-tt'))
 
     def test_metal_tool_takes_name_then_sdk(self) -> None:
         """The signature is (name, sdk). Both call sites once had it backwards, which made
@@ -703,6 +741,121 @@ class ShimTest(unittest.TestCase):
                                capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def _map_in_child(self, td: Path, script: str) -> subprocess.CompletedProcess:
+        """Run `script` against the generated sitecustomize, as a build's child interpreter does."""
+        shim.install(td / 'shim', python_exe=sys.executable)
+        env = dict(os.environ, PYTHONPATH=str(td / 'shim'), NSPB_SHIM_OFF='')
+        return subprocess.run([sys.executable, '-c', script], env=env,
+                              capture_output=True, text=True)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows subprocess shim')
+    def test_extractor_mapping_runs_the_dll_through_dotnet(self) -> None:
+        # What driver.build_nx_extract / find_nx_extract return is a .NET apphost, and on a
+        # Windows build with incomplete user-mode CET every such apphost fails fast ("Your
+        # Windows doesn't fully support CET"). The dll beside it is the same program through
+        # the unmarked host. Both spellings the driver returns must map: `nx_extract.exe`
+        # (find_nx_extract, and the bundled path) and `nx_extract` (build_nx_extract's
+        # work/tools/nx_extract/nx_extract).
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            out = root / 'nx_extract-abc123'
+            out.mkdir()
+            (out / 'nx_extract.exe').write_bytes(b'MZ-apphost')
+            (out / 'nx_extract.dll').write_bytes(b'MZ-dll')
+            script = ("import sitecustomize as s, toolchain\n"
+                      "from pathlib import Path\n"
+                      "toolchain.dotnet_dir = lambda: Path('portable-dotnet')\n"
+                      f"out = Path({str(out)!r})\n"
+                      "host = str(Path('portable-dotnet') / 'dotnet.exe')\n"
+                      "for name in ('nx_extract.exe', 'nx_extract', 'nx_extract.EXE'):\n"
+                      "    got = s._map([str(out / name), '--source-sha'])\n"
+                      "    assert got == [host, str(out / 'nx_extract.dll'), '--source-sha'], (name, got)\n")
+            r = self._map_in_child(root, script)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows subprocess shim')
+    def test_extractor_mapping_leaves_a_binary_without_a_dll_alone(self) -> None:
+        # The committed dm/tools/nx_extract_bin/nx_extract is a Mach-O universal binary
+        # (cafebabe): no dll beside it and nothing to run through dotnet. The mapping must not
+        # invent a command for it -- on Windows the driver builds from source instead, and a
+        # wrong rewrite here would hide that behind a confusing .NET error.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            bundled = root / 'dm/tools/nx_extract_bin'
+            bundled.mkdir(parents=True)
+            (bundled / 'nx_extract').write_bytes(b'\xca\xfe\xba\xbe\x00\x00\x00\x02')
+            script = ("import sitecustomize as s\n"
+                      f"p = {str(bundled / 'nx_extract')!r}\n"
+                      "got = s._map([p, '--source-sha'])\n"
+                      "assert got == [p, '--source-sha'], got\n")
+            r = self._map_in_child(root, script)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows subprocess shim')
+    def test_extractor_mapping_keeps_every_argument(self) -> None:
+        # nsp.run() hands the extractor its whole command line; the rewrite replaces argv[0]
+        # and must leave the rest in order, including paths with spaces and `--opt=value`.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            out = root / 'nx_extract-abc123'
+            out.mkdir()
+            (out / 'nx_extract.dll').write_bytes(b'MZ-dll')
+            argv = ['--list', '--program=0100AAAA00000000',
+                    'C:\\some folder\\package.nsp', 'C:\\out\\dir', '--allow-damaged']
+            script = ("import sitecustomize as s, toolchain\n"
+                      "from pathlib import Path\n"
+                      "toolchain.dotnet_dir = lambda: Path('portable-dotnet')\n"
+                      f"got = s._map([{str(out / 'nx_extract.exe')!r}] + {argv!r})\n"
+                      f"assert got[2:] == {argv!r}, got\n"
+                      "assert got[1].endswith('nx_extract.dll'), got\n")
+            r = self._map_in_child(root, script)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows signal adapter')
+    def test_sighup_stand_in_lets_the_nsp_script_register_its_stop_signals(self) -> None:
+        # scripts/build_ipa_from_nsp.py builds STOPS = (signal.SIGTERM, signal.SIGHUP) at
+        # module level and cli() registers a handler for each, restoring them in its finally.
+        # Windows has neither the constant nor the ability to catch 1 (CTRL_BREAK_EVENT
+        # there), so without the stand-in the import of the whole NSP script fails.
+        with tempfile.TemporaryDirectory() as td:
+            script = ("import signal\n"
+                      "assert hasattr(signal, 'SIGHUP'), 'no SIGHUP stand-in'\n"
+                      "h = lambda s, f: None\n"
+                      "saved = {s: signal.signal(s, h) for s in (signal.SIGTERM, signal.SIGHUP)}\n"
+                      "assert saved[signal.SIGHUP] is None, saved\n"
+                      "assert signal.getsignal(signal.SIGTERM) is h, 'a real signal must pass through'\n"
+                      "for s, old in saved.items():\n"
+                      "    signal.signal(s, signal.SIG_DFL if old is None else old)\n")
+            r = self._map_in_child(Path(td), script)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows signal adapter')
+    def test_load_upstream_stands_in_sighup_without_the_shim(self) -> None:
+        # load_upstream is also called with no shim on PYTHONPATH (the tests do it, and so
+        # does any caller that imports the driver directly). Its own fallback must cover the
+        # same import, and must be idempotent: a second call must not wrap signal.signal again.
+        with tempfile.TemporaryDirectory() as td:
+            env = {k: v for k, v in os.environ.items() if k != 'PYTHONPATH'}
+            env['NSPB_SHIM_OFF'] = '1'
+            script = ("import sys\n"
+                      f"sys.path.insert(0, {str(QT)!r})\n"
+                      "import signal\n"
+                      "assert not hasattr(signal, 'SIGHUP'), 'the shim must not be loaded here'\n"
+                      "from nspb_qt.win import driver\n"
+                      "driver._install_sighup_stub()\n"
+                      "once = signal.signal\n"
+                      "driver._install_sighup_stub()\n"
+                      "assert signal.signal is once, 'wrapped twice'\n"
+                      "assert signal.SIGHUP == 1, signal.SIGHUP\n"
+                      "assert signal.signal(signal.SIGHUP, lambda s, f: None) is None\n"
+                      "h = lambda s, f: None\n"
+                      "prev = signal.signal(signal.SIGTERM, h)\n"
+                      "assert signal.getsignal(signal.SIGTERM) is h\n"
+                      "signal.signal(signal.SIGTERM, prev)\n")
+            r = subprocess.run([sys.executable, '-c', script], env=env,
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
 
 class DriverCliTest(unittest.TestCase):
     """Mac-only options are refused before any work starts."""
@@ -778,12 +931,24 @@ class DriverPatchTest(unittest.TestCase):
         self.assertTrue(self.mod.apple_silicon())
 
     def test_check_prereqs_raises_with_a_report(self) -> None:
-        with self.assertRaises(self.mod.BuildError) as ctx:
-            self.mod.check_prereqs({}, Path('missing/dmsh_xlate'), mac=False)
+        # The report is about the PC's tools, so the test has to establish that one is missing.
+        # On a fully provisioned machine check_all() finds nothing required-and-bad and
+        # check_prereqs falls through to the repository check -- a different message, which is
+        # what this test used to hit on any PC that had everything installed.
+        missing = tc.Probe(id='llvm', name='LLVM (clang)', state='missing',
+                           hint='Install all missing in the Dependencies panel')
+        with mock.patch.object(tc, 'check_all', return_value=[missing]):
+            with self.assertRaises(self.mod.BuildError) as ctx:
+                self.mod.check_prereqs({}, Path('missing/dmsh_xlate'), mac=False)
         msg = str(ctx.exception)
         self.assertIn('missing on this PC', msg)
         # the message must name what to do, not just what is wrong
         self.assertTrue('LLVM' in msg or 'clang' in msg.lower())
+        # with every tool present the repository check is what fires, on any machine
+        with mock.patch.object(tc, 'check_all', return_value=[]):
+            with self.assertRaises(self.mod.BuildError) as ctx:
+                self.mod.check_prereqs({}, Path('missing/dmsh_xlate'), mac=False)
+        self.assertIn('missing from the repository', str(ctx.exception))
 
     def test_check_prereqs_refuses_mac(self) -> None:
         with self.assertRaises(self.mod.BuildError) as ctx:
@@ -1665,6 +1830,95 @@ class DotnetTest(unittest.TestCase):
             self.assertEqual(out, root / f'dotnet-{tc.DOTNET_VERSION}')
             self.assertTrue((out / 'dotnet.exe').is_file())
             self.assertTrue((out / 'sdk/10.0.403/dotnet.dll').is_file())
+
+
+    def _fake_sdk(self, td: str) -> tuple[Path, Path]:
+        """A .NET root with the SDK's Roslyn apphost and dll, as csc_tool_args finds them."""
+        root = Path(td) / 'dotnet'
+        bincore = root / 'sdk' / '10.0.403' / 'Roslyn' / 'bincore'
+        bincore.mkdir(parents=True)
+        (root / 'dotnet.exe').write_bytes(b'MZ')
+        (bincore / 'csc.exe').write_bytes(b'MZ')
+        (bincore / 'csc.dll').write_bytes(b'MZ')
+        return root, bincore
+
+    def test_csc_args_empty_when_the_apphost_works(self) -> None:
+        """A healthy machine keeps the SDK's own compiler: no wrapper, no MSBuild overrides."""
+        with tempfile.TemporaryDirectory() as td:
+            root, _ = self._fake_sdk(td)
+            ok = subprocess.CompletedProcess([], 0, 'Microsoft (R) Visual C#', '')
+            with mock.patch.object(tc, 'dotnet_dir', return_value=root), \
+                    mock.patch.object(tc, 'dotnet_sdks', return_value=['10.0.403']), \
+                    mock.patch.object(tc, 'tools_dir', return_value=Path(td) / 'tools'), \
+                    mock.patch.object(tc.subprocess, 'run', return_value=ok) as run:
+                self.assertEqual(tc.csc_tool_args(), [])
+            self.assertEqual(run.call_count, 1)
+            self.assertFalse((Path(td) / 'tools' / 'csc-wrap').exists())
+
+    def test_csc_args_route_through_dotnet_when_cet_blocks_the_apphost(self) -> None:
+        """Windows 11 build 22000: csc.exe exits 0x80131506 with the CET message, so publish died in
+        Microsoft.CSharp.Core.targets and tool_lock reported "the translator does not run"."""
+        with tempfile.TemporaryDirectory() as td:
+            root, bincore = self._fake_sdk(td)
+            tools = Path(td) / 'tools'
+            cet = subprocess.CompletedProcess(
+                [], 0x80131506, '', "Fatal error.\nYour Windows doesn't fully support CET.")
+            with mock.patch.object(tc, 'dotnet_dir', return_value=root), \
+                    mock.patch.object(tc, 'dotnet_sdks', return_value=['10.0.403']), \
+                    mock.patch.object(tc, 'tools_dir', return_value=tools), \
+                    mock.patch.object(tc.subprocess, 'run', return_value=cet):
+                args = tc.csc_tool_args()
+            self.assertIn('-p:UseSharedCompilation=false', args)
+            self.assertIn('-p:CscToolExe=csc.cmd', args)
+            wrap = tools / 'csc-wrap'
+            self.assertIn(f'-p:CscToolPath={wrap}', args)
+            body = (wrap / 'csc.cmd').read_text(encoding='utf-8')
+            self.assertIn(str(root / 'dotnet.exe'), body)
+            self.assertIn(str(bincore / 'csc.dll'), body)
+            self.assertIn('%*', body)
+
+    def test_csc_args_do_not_mask_another_apphost_failure(self) -> None:
+        """"You must install or update .NET" is a different problem: leave it to fail visibly."""
+        with tempfile.TemporaryDirectory() as td:
+            root, _ = self._fake_sdk(td)
+            other = subprocess.CompletedProcess(
+                [], 2147516566, '', 'You must install or update .NET to run this application.')
+            with mock.patch.object(tc, 'dotnet_dir', return_value=root), \
+                    mock.patch.object(tc, 'dotnet_sdks', return_value=['10.0.403']), \
+                    mock.patch.object(tc, 'tools_dir', return_value=Path(td) / 'tools'), \
+                    mock.patch.object(tc.subprocess, 'run', return_value=other):
+                self.assertEqual(tc.csc_tool_args(), [])
+            self.assertFalse((Path(td) / 'tools' / 'csc-wrap').exists())
+
+    def test_csc_probe_sets_dotnet_root(self) -> None:
+        """Without DOTNET_ROOT the apphost looks in C:\\Program Files\\dotnet and fails with a
+        different message, which hid the CET one this probe exists to find."""
+        with tempfile.TemporaryDirectory() as td:
+            root, _ = self._fake_sdk(td)
+            ok = subprocess.CompletedProcess([], 0, '', '')
+            with mock.patch.object(tc, 'dotnet_dir', return_value=root), \
+                    mock.patch.object(tc, 'dotnet_sdks', return_value=['10.0.403']), \
+                    mock.patch.object(tc, 'tools_dir', return_value=Path(td) / 'tools'), \
+                    mock.patch.object(tc.subprocess, 'run', return_value=ok) as run:
+                tc.csc_tool_args()
+            env = run.call_args.kwargs['env']
+            self.assertEqual(env['DOTNET_ROOT'], str(root))
+            self.assertEqual(env['DOTNET_ROOT_X64'], str(root))
+
+    def test_csc_probe_answer_is_cached(self) -> None:
+        """One `csc.exe -?` per compiler, not one per publish: the answer is keyed on its stamp."""
+        with tempfile.TemporaryDirectory() as td:
+            root, _ = self._fake_sdk(td)
+            cet = subprocess.CompletedProcess([], 0x80131506, '', "Your Windows doesn't fully support CET.")
+            with mock.patch.object(tc, 'dotnet_dir', return_value=root), \
+                    mock.patch.object(tc, 'dotnet_sdks', return_value=['10.0.403']), \
+                    mock.patch.object(tc, 'tools_dir', return_value=Path(td) / 'tools'), \
+                    mock.patch.object(tc.subprocess, 'run', return_value=cet) as run:
+                first = tc.csc_tool_args()
+                second = tc.csc_tool_args()
+            self.assertEqual(first, second)
+            self.assertEqual(run.call_count, 1)
+            self.assertTrue(first)
 
 
 class ConsoleWindowTest(unittest.TestCase):
@@ -4288,10 +4542,15 @@ class WindowsBuildFixesTest(unittest.TestCase):
                 if sname == 'settings.py':
                     Path(args[3]).write_text('{"schema":1,"settings":[]}', encoding='utf-8')
                     return 'launcher.json'
-                if sname == 'make_ext_font.py':
-                    Path(args[0]).write_bytes(b'ext')
-                    return 'ok'
                 return ''
+
+            font_calls: list[tuple[Path, Path, Path, Path]] = []
+
+            def fake_shared_fonts(repo_arg: Path, out_dir: Path, font_arg: Path, letter_arg: Path) -> None:
+                font_calls.append((repo_arg, out_dir, font_arg, letter_arg))
+                for fname in ('standard.ttf', 'chinese_simplified.ttf', 'chinese_simplified_ext.ttf',
+                              'chinese_traditional.ttf', 'korean.ttf', 'nintendo_ext.ttf'):
+                    (out_dir / fname).write_bytes(b'ttf')
 
             pack_calls: list[list[str]] = []
             identity_line = (b'DMROMFSID1 title=010015100B514000 version=1.0 '
@@ -4333,15 +4592,19 @@ class WindowsBuildFixesTest(unittest.TestCase):
                     mock.patch.object(tc, 'sdk_version', return_value=('26.0', '23A344')),
                     mock.patch.object(tc, 'std_font', return_value=std_font),
                     mock.patch.object(tc, 'letter_font', return_value=letter_font),
-                    mock.patch.object(build_app, 'py', side_effect=fake_py),
-                    mock.patch.object(build_app, 'romfs_has', return_value=True),
-                    mock.patch.object(build_app, 'shader_lib_has', return_value=True),
+                    mock.patch.multiple(
+                        build_app,
+                        py=fake_py,
+                        _build_shared_fonts=fake_shared_fonts,
+                        romfs_has=lambda *_a, **_kw: True,
+                        shader_lib_has=lambda *_a, **_kw: True,
+                        host_sources=lambda *_a, **_kw: ([], []),
+                        framework_list=lambda *_a, **_kw: ['Foundation'],
+                        compat_rt_needed=lambda *_a, **_kw: False,
+                        compile_all=lambda *_a, **_kw: [],
+                        link=lambda *_a, **_kw: None,
+                    ),
                     mock.patch.object(build_app, 'build_pso_archive', return_value=pso_dir) as spy_pso,
-                    mock.patch.object(build_app, 'host_sources', return_value=([], [])),
-                    mock.patch.object(build_app, 'framework_list', return_value=['Foundation']),
-                    mock.patch.object(build_app, 'compat_rt_needed', return_value=False),
-                    mock.patch.object(build_app, 'compile_all', return_value=[]),
-                    mock.patch.object(build_app, 'link', return_value=None),
                     mock.patch.object(build_app.fix_ipa_modes, 'fix', return_value='ok'),
                     mock.patch.object(build_app.subprocess, 'run', side_effect=fake_subproc_run),
                 ):
@@ -4362,6 +4625,41 @@ class WindowsBuildFixesTest(unittest.TestCase):
                     # iOS's romfs_id_parse stops at LF, so a trailing CR makes
                     # strtoull reject the index and reports ROMFS_ID_BAD (2).
                     self.assertEqual(identity_file.read_bytes(), identity_line + b'\n')
+                self.assertTrue(font_calls)
+                self.assertEqual(font_calls[-1][2], std_font)
+                self.assertEqual(font_calls[-1][3], letter_font)
+                font_calls.clear()
+
+    def test_build_shared_fonts_passes_explicit_std_and_letter_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tools = root / 'dm/tools'
+            tools.mkdir(parents=True)
+            calls: list[tuple[str, str, str]] = []
+            (tools / 'make_shared_fonts.py').write_text(
+                'def build(out_dir, src, letters):\n'
+                '    import os\n'
+                '    os.makedirs(out_dir, exist_ok=True)\n'
+                '    _RECORD.append((out_dir, src, letters))\n',
+                encoding='utf-8',
+            )
+            out_dir = root / 'out_fonts'
+            std_font = root / 'win_std.ttf'
+            letter_font = root / 'win_letter.ttf'
+            saved = sys.modules.pop('make_shared_fonts', None)
+            try:
+                import importlib
+                sys.path.insert(0, str(tools))
+                mod = importlib.import_module('make_shared_fonts')
+                mod._RECORD = calls
+                build_app._build_shared_fonts(root, out_dir, std_font, letter_font)
+                self.assertEqual(calls, [(str(out_dir), str(std_font), str(letter_font))])
+            finally:
+                sys.modules.pop('make_shared_fonts', None)
+                if saved is not None:
+                    sys.modules['make_shared_fonts'] = saved
+                if str(tools) in sys.path:
+                    sys.path.remove(str(tools))
 
 
 class UnrealInlineShadersWinTest(unittest.TestCase):
@@ -7557,6 +7855,303 @@ class RomfsTrailerAndManifestArgsTests(unittest.TestCase):
             self.assertEqual(msl_cache.get('gfx_api'), 'vulkan')
             self.assertEqual(Path(msl_cache.get('msl_root', '')), w / 'build' / 'ios' / 'dmsh_b')
             self.assertEqual(Path(msl_cache.get('lib_path', '')), w / 'build' / 'ios' / 'dmsh_b' / 'vk')
+
+
+class WindowsMissingPrereqAndStrippedDefenderTest(unittest.TestCase):
+    """Stripped-Windows Defender module fallback, VC++ Redistributable probe, NTSTATUS diagnostics, and shader failure attribution."""
+
+    def test_defender_scripts_handle_missing_module_and_stripped_windows(self) -> None:
+        from nspb_qt.win import defender
+
+        elev = defender.build_inner_elevation_script(r'C:\Temp\payload.json')
+        self.assertIn('Ensure-DefenderModule', elev)
+        self.assertIn(r'System32\WindowsPowerShell\v1.0\Modules\Defender', elev)
+        self.assertIn("if ($null -eq (Get-Command -Name 'Add-MpPreference'", elev)
+        self.assertIn("error_code = 'service_inactive'", elev)
+        self.assertIn('if ($null -eq $svc -and $null -eq $st)', elev)
+        self.assertIn('CommandNotFoundException', elev)
+
+        rem = defender.build_inner_removal_script(r'C:\Temp\payload.json')
+        self.assertIn('Ensure-DefenderModule', rem)
+        self.assertIn("if ($null -eq (Get-Command -Name 'Remove-MpPreference'", rem)
+        self.assertIn('Write-AtomicJson $resultPath @{ ok = $true', rem)
+
+    def test_model_apply_defender_service_inactive_dismisses_prompt(self) -> None:
+        import ast
+        import threading
+        from nspb_qt.i18n import Lang
+        from nspb_qt.l10n import t as l10n_t
+        from nspb_qt.win import defender
+
+        src = (QT / 'nspb_qt' / 'model.py').read_text(encoding='utf-8')
+        tree = ast.parse(src)
+        cls_node = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'Model')
+        wanted = {
+            '_defender_failure_message',
+            'defender_info',
+            'should_prompt_defender_before_build',
+            'apply_defender_exclusions',
+            '_invoke_defender_done',
+        }
+        methods = [n for n in cls_node.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
+        mod_node = ast.fix_missing_locations(ast.Module(body=methods, type_ignores=[]))
+
+        pending_workers: list[object] = []
+
+        class _ImmediateThread:
+            def __init__(self, target=None, daemon=None):
+                self._target = target
+
+            def start(self):
+                if self._target:
+                    pending_workers.append(self._target)
+
+        class _Sig:
+            def emit(self, *a):
+                pass
+
+        class _DummyQThread:
+            @staticmethod
+            def currentThread():
+                return 'main'
+
+        ns: dict = {
+            'Callable': object,
+            'Slot': lambda *a, **k: (lambda fn: fn),
+            'Q_ARG': lambda *_a: None,
+            'QThread': _DummyQThread,
+            'QMetaObject': type('QM', (), {'invokeMethod': staticmethod(lambda obj, name, *_a: getattr(obj, name)())}),
+            'Qt': type('Qt', (), {'QueuedConnection': 1}),
+            'threading': type('T', (), {'Thread': _ImmediateThread}),
+            '__package__': 'nspb_qt',
+        }
+        exec(compile(mod_node, str(QT / 'nspb_qt' / 'model.py'), 'exec'), ns)
+
+        class _Harness:
+            apply_defender_exclusions = ns['apply_defender_exclusions']
+            _defender_failure_message = ns['_defender_failure_message']
+            _invoke_defender_done = ns['_invoke_defender_done']
+            should_prompt_defender_before_build = ns['should_prompt_defender_before_build']
+            defender_info = ns['defender_info']
+
+            def __init__(self):
+                self.show_defender_ui = True
+                self.defender_busy = False
+                self.defender_status_ok = False
+                self.defender_status_msg = ''
+                self.lang = Lang('zh')
+                self.repo_path = ''
+                self.repo_ok = False
+                self.out_dir = ''
+                self.shell_cache_path = ''
+                self.base_path = ''
+                self._defender_gen = 0
+                self._defender_lock = threading.RLock()
+                self._defender_callbacks = {}
+                self.repoChanged = _Sig()
+                self.depsChanged = _Sig()
+                self._settings: dict[str, bool] = {}
+
+            def _current_build_dirs(self, *, title_id=None):
+                return r'D:\games\botw', r'D:\build\01007EF00011E000_build'
+
+            def _emit_repo_changed(self):
+                pass
+
+            def _emit_deps_changed(self):
+                pass
+
+            def thread(self):
+                return 'main'
+
+            def log(self, _msg):
+                pass
+
+            def t(self, key: str, *args: object) -> str:
+                return l10n_t(key, self.lang, *args)
+
+            def settings_value(self, k: str, default=False):
+                return self._settings.get(k, default)
+
+            def settings_set(self, k: str, val: bool):
+                self._settings[k] = val
+
+        h = _Harness()
+        with tempfile.TemporaryDirectory() as td:
+            fake_tools = Path(td) / 'NS Port Builder' / 'tools'
+            fake_tools.mkdir(parents=True)
+            with mock.patch.object(tc, 'tools_dir', return_value=fake_tools):
+                self.assertTrue(h.should_prompt_defender_before_build())
+                h.apply_defender_exclusions()
+                w = pending_workers.pop(0)
+                with mock.patch.object(
+                    defender,
+                    'apply_exclusions',
+                    return_value=defender.DefenderResult(ok=False, error='no module', error_code='service_inactive'),
+                ):
+                    w()
+                self.assertEqual(h.defender_status_msg, h.t('defender.msg.inactive'))
+                self.assertTrue(h.settings_value('defenderPromptDismissed', False))
+                self.assertFalse(h.should_prompt_defender_before_build())
+
+    def test_vcredist_probe_and_ntstatus_exit_explanation(self) -> None:
+        if os.name != 'nt':
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop(tc.ENV_SYSTEM32, None)
+                self.assertIsNone(tc.probe_vcredist())
+
+        with tempfile.TemporaryDirectory() as td:
+            sys32 = Path(td)
+            (sys32 / 'VCRUNTIME140.dll').write_bytes(b'MZ')
+            with mock.patch.dict(os.environ, {tc.ENV_SYSTEM32: str(sys32)}, clear=False):
+                probe = tc.probe_vcredist()
+                self.assertIsNotNone(probe)
+                assert probe is not None
+                self.assertEqual(probe.state, 'missing')
+                self.assertIn('vcruntime140_1.dll, msvcp140.dll', probe.detail)
+                self.assertIn(tc.VCREDIST_URL, probe.hint)
+                all_ids = {p.id: p for p in tc.check_all(deep=False)}
+                self.assertIn('vcredist', all_ids)
+                self.assertEqual(all_ids['vcredist'].state, 'missing')
+
+                hint_135 = tc.explain_process_exit(-1073741515, Path('metal.exe'))
+                self.assertIn('0xC0000135', hint_135)
+                self.assertIn('vcruntime140_1.dll, msvcp140.dll', hint_135)
+
+                hint_07b = tc.explain_process_exit(0xC000007B, Path('metal.exe'))
+                self.assertIn('0xC000007B', hint_07b)
+                self.assertIn('32-bit/64-bit DLL mismatch', hint_07b)
+
+                (sys32 / 'vcruntime140_1.dll').write_bytes(b'MZ')
+                (sys32 / 'msvcp140.dll').write_bytes(b'MZ')
+                ok_probe = tc.probe_vcredist()
+                self.assertIsNotNone(ok_probe)
+                assert ok_probe is not None
+                self.assertEqual(ok_probe.state, 'ok')
+
+    def test_probe_metal_passes_relaxed_math_and_flags_old_metal_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sdk = make_fake_sdk(root, '26.0')
+            seen_cmds: list[list[str]] = []
+
+            def fake_ok(cmd, *a, **kw):
+                seen_cmds.append([str(c) for c in cmd])
+                if '-o' in cmd:
+                    Path(cmd[cmd.index('-o') + 1]).write_bytes(b'MTLB')
+                return subprocess.CompletedProcess(cmd, 0, '', '')
+
+            with (
+                mock.patch.object(tc, 'metal_tool', side_effect=lambda name, *a: Path(f'C:/metal/{name}.exe')),
+                mock.patch.object(tc.subprocess, 'run', side_effect=fake_ok),
+            ):
+                ok, detail = tc.probe_metal(sdk)
+            self.assertTrue(ok, detail)
+            self.assertIn('-fmetal-math-mode=relaxed', seen_cmds[0])
+            self.assertIn('-fpreserve-invariance', seen_cmds[0])
+            self.assertIn('-fwrapv', seen_cmds[0])
+
+            def fake_old(cmd, *a, **kw):
+                return subprocess.CompletedProcess(cmd, 1, '', "metal.exe: error: unknown argument: '-fmetal-math-mode=relaxed'\n")
+
+            with (
+                mock.patch.object(tc, 'metal_tool', side_effect=lambda name, *a: Path(f'C:/metal/{name}.exe')),
+                mock.patch.object(tc.subprocess, 'run', side_effect=fake_old),
+            ):
+                ok, detail = tc.probe_metal(sdk)
+            self.assertFalse(ok)
+            self.assertIn('installed Metal Developer Tools for Windows is too old', detail)
+
+            def fake_135(cmd, *a, **kw):
+                return subprocess.CompletedProcess(cmd, -1073741515, '', '')
+
+            sys32 = root / 'sys32'
+            sys32.mkdir()
+            with (
+                mock.patch.dict(os.environ, {tc.ENV_SYSTEM32: str(sys32)}, clear=False),
+                mock.patch.object(tc, 'metal_tool', side_effect=lambda name, *a: Path(f'C:/metal/{name}.exe')),
+                mock.patch.object(tc.subprocess, 'run', side_effect=fake_135),
+            ):
+                ok, detail = tc.probe_metal(sdk)
+            self.assertFalse(ok)
+            self.assertIn('0xC0000135', detail)
+            self.assertIn('vcruntime140.dll', detail)
+
+    def test_driver_diagnoses_empty_ios_shader_log_and_missing_spirv_cross(self) -> None:
+        from types import SimpleNamespace
+        from nspb_qt.win import driver
+
+        with tempfile.TemporaryDirectory() as td:
+            sys32 = Path(td) / 'sys32'
+            sys32.mkdir()
+            (sys32 / 'vcruntime140.dll').write_bytes(b'MZ')
+            with mock.patch.dict(os.environ, {tc.ENV_SYSTEM32: str(sys32)}, clear=False):
+                msg_135 = driver.diagnose_empty_shader_log('metal.exe failed with exit code -1073741515 (0xc0000135)')
+                self.assertIn('0xC0000135', msg_135)
+                self.assertIn('vcruntime140_1.dll, msvcp140.dll', msg_135)
+
+            self.assertIn(
+                'Metal Developer Tools for Windows (metal.exe / metallib.exe) is missing',
+                driver.diagnose_empty_shader_log("no Windows tool for `xcrun -sdk iphoneos metal`"),
+            )
+            self.assertIn(
+                'installed Metal Developer Tools for Windows is too old',
+                driver.diagnose_empty_shader_log("metal.exe: error: unknown argument: '-fmetal-math-mode=relaxed'"),
+            )
+            self.assertIn(
+                'all 24 shader compiles failed: unexpected AIR opcode',
+                driver.diagnose_empty_shader_log('  [fail] unexpected AIR opcode\nshaders 24: ok 0, fail 24\n'),
+            )
+
+            # Verify driver.patch wraps build_shaders to surface dmsh_build.log root cause and missing spirv-cross
+            class FakeBuildError(Exception):
+                pass
+
+            logs = Path(td) / 'logs'
+            logs.mkdir()
+            (logs / 'dmsh_build.log').write_text(
+                "error: unknown argument: '-fmetal-math-mode=relaxed'\nshaders 12: ok 0, fail 12\n",
+                encoding='utf-8',
+            )
+            sh = Path(td) / 'shader'
+            sh.mkdir()
+            repo = Path(td) / 'repo'
+            repo.mkdir()
+            (repo / 'dm/gfx/tools/spirv_cross_bin').mkdir(parents=True)
+
+            def failing_build_shaders(py, repo_, sh_, xlate, env, logs_, g, *a, **kw):
+                raise FakeBuildError(rf'no iOS shader libraries in {sh_}\ios\b-0123456789ab')
+
+            mod = SimpleNamespace(
+                BuildError=FakeBuildError,
+                say=lambda *_a, **_k: None,
+                run=lambda *_a, **_k: 0,
+                PROG=SimpleNamespace(stage=lambda *a, **k: None, end=lambda *a, **k: None),
+                chain_of=lambda *_a: '0123456789ab',
+                build_shaders=failing_build_shaders,
+                glslc_done=lambda *_a: set(),
+                capture_wanted=lambda *_a: 0,
+            )
+            with mock.patch.object(tc, 'llvm_dir', return_value=None), \
+                 mock.patch.object(tc, 'find_exe', return_value=None), \
+                 mock.patch.object(tc, 'dotnet_dir', return_value=None):
+                driver.patch(mod, repo)
+
+            with (
+                mock.patch.object(tc, 'find_exe', return_value=None),
+                mock.patch.object(driver.shutil, 'which', return_value=None),
+            ):
+                with self.assertRaises(FakeBuildError) as ctx_sc:
+                    mod.build_shaders(sys.executable, repo, sh, repo / 'xlate', {}, logs, None)
+                self.assertIn('missing on this PC', str(ctx_sc.exception))
+                self.assertIn('spirv-cross', str(ctx_sc.exception))
+
+            fake_sc = Path(td) / 'spirv-cross.exe'
+            fake_sc.write_bytes(b'MZ')
+            with self.assertRaises(FakeBuildError) as ctx_log:
+                mod.build_shaders(sys.executable, repo, sh, repo / 'xlate', {'SPIRV_CROSS': str(fake_sc)}, logs, None)
+            self.assertIn('no iOS shader libraries in', str(ctx_log.exception))
+            self.assertIn('installed Metal Developer Tools for Windows is too old', str(ctx_log.exception))
 
 
 if __name__ == '__main__':

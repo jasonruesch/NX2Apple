@@ -1566,6 +1566,22 @@ class BuildFolder:
     _CHAIN_VER_RE = re.compile(r'^(?:mac-)?(b-[0-9a-f]{12})(?:\.key|\.img(?:\.part)?)?$')
 
     @staticmethod
+    def finished_extraction(work_dir: str) -> int:
+        """Bytes of the finished extractions in <work_dir>/extract (each v<version> with its extract.key, ExeFS/main and
+        RomFS.img). A new build in the same folder reuses or replaces them, so they need no new space (#1243)."""
+        extract = Path(work_dir, 'extract')
+        try:
+            versions = list(extract.iterdir())
+        except OSError:
+            return 0
+        total = 0
+        for v in versions:
+            if (v.name[:1] == 'v' and v.name[1:].isascii() and v.name[1:].isdigit()
+                    and all((v / part).is_file() for part in ('extract.key', 'ExeFS/main', 'RomFS.img'))):
+                total += BuildFolder.size(str(v))
+        return total
+
+    @staticmethod
     def size(path: str, seen_inodes: set[tuple[int, int]] | None = None) -> int:
         if not path or not os.path.lexists(path):
             return 0
@@ -1764,6 +1780,12 @@ class BuildFolder:
 # GameDeletion (mirrors GameDeletion.swift)
 # ---------------------------------------------------------------------------
 
+def _move_to_trash(path: str) -> bool:
+    from PySide6.QtCore import QFile
+
+    return QFile.moveToTrash(path)
+
+
 @dataclass
 class GameDeletionItem:
     kind: str  # 'macApp', 'ipa', 'iosApp', 'archive', 'shellFramework', 'buildFolder', 'log', 'saves'
@@ -1838,7 +1860,7 @@ class GameDeletionPlan:
 
         return GameDeletionPlan(title_id=game.title_id, items=items, saves=saves_item, shell_root=shared_root)
 
-    def run(self, delete_saves: bool = False) -> list[str]:
+    def run(self, delete_saves: bool = False, trash: Callable[[str], bool] = _move_to_trash) -> list[str]:
         failed: list[str] = []
         all_items = list(self.items)
         if delete_saves and self.saves:
@@ -1848,12 +1870,17 @@ class GameDeletionPlan:
                 if not os.path.exists(p):
                     continue
                 try:
-                    if os.path.isdir(p) and not os.path.islink(p):
-                        shutil.rmtree(p)
-                    else:
-                        os.remove(p)
-                except OSError:
+                    if not trash(p):
+                        failed.append(p)
+                except Exception:
                     failed.append(p)
+        build_paths = next((it.paths for it in self.items if it.kind == 'buildFolder'), [])
+        if build_paths:
+            folder = os.path.dirname(build_paths[0])
+            try:
+                os.rmdir(folder)
+            except OSError:
+                pass
         if self.shell_root:
             from .win.shell_export import ShellLibrary
             shell = ShellLibrary.load(self.shell_root)
