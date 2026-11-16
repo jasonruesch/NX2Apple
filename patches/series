@@ -38,7 +38,7 @@
 0037-mac-controller-followups.patch
 0038-bc-cpu-decode.patch
 0039-ios-game-framework.patch
-0040-ios-touch-settings-and-toggle.patch
+0040-ios-support-standalone-touch-settings-and.patch
 0041-ios-host-teardown.patch
 0044-host-haptics-drive-joycon-l-and-joycon-r-on-sepa.patch
 0046-ios-audio-add-dm-audio-mix-audio-session-mixing.patch
@@ -49,3 +49,9 @@
 0051-host-gfx-tools-ios-support-dmmsltr1-shader-trail.patch
 0052-ios-strip-msl-from-framework-only-builds-and-wri.patch
 0053-build-add-persistent-build-seeds-and-fast-refres.patch
+0054-mac-host-join-the-default-preferences-domain-at.patch
+0055-gfx-adaptive-ios-memory-pressure-convergence-for.patch
+0056-tools-shader-lib-a-failed-write-removes-its-part.patch
+0057-motion-a-controller-is-a-source-once-its-rotatio.patch
+0058-test-native-controller-motion-primes-the-adapter.patch
+0059-gfx-keep-argument-block-and-ub-padded-arena-gpu.patch
