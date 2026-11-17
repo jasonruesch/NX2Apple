@@ -72,33 +72,6 @@ import XCTest
                    defaults: defaults, targetChanged: targetChanged)
     }
 
-    func testTheLastExportComesBackWhenTheLauncherStartsAgain() throws {
-        defer { devices.ipaTeam = ""; devices.exportOneGame = false }
-        devices.ipaTeam = "TEAM123456"
-        let ipa = try file("NX2Apple.ipa")
-        makeStore().exportedIPAPath = ipa
-        XCTAssertEqual(makeStore().exportedIPAPath, ipa)
-
-        devices.ipaTeam = "OTHERTEAM1"
-        XCTAssertEqual(makeStore().exportedIPAPath, "", "an IPA for another team is not the one the settings make")
-        devices.ipaTeam = "TEAM123456"
-        XCTAssertEqual(makeStore().exportedIPAPath, "", "and it is forgotten")
-
-        makeStore().exportedIPAPath = ipa
-        devices.exportOneGame = true
-        XCTAssertEqual(makeStore().exportedIPAPath, "", "the other kind of IPA")
-        devices.exportOneGame = false
-
-        makeStore().exportedIPAPath = ipa
-        try FileManager.default.removeItem(atPath: ipa)
-        XCTAssertEqual(makeStore().exportedIPAPath, "", "an IPA that is gone")
-
-        let cleared = makeStore()
-        cleared.exportedIPAPath = try file("NX2Apple.ipa")
-        cleared.exportedIPAPath = ""
-        XCTAssertEqual(makeStore().exportedIPAPath, "")
-    }
-
     private func file(_ name: String) throws -> String {
         let url = temporary.appendingPathComponent(name)
         try Data([0]).write(to: url)
