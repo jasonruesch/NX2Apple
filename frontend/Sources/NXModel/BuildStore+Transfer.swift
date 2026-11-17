@@ -42,15 +42,8 @@ extension BuildStore {
         return library.games
     }
 
-    /// What the shared app's IPA holds, against the last IPA: the export card's list. The build form's game is
-    /// "Build and export"'s, when the form has one.
-    package var ipaContents: IPAContents {
-        let building = gameTitleID.map { (titleID: $0, name: gameName) }
-        return IPAContents.read(root: shellRoot, building: canBuild ? building : nil)
-    }
-
     /// The IPA of the frameworks that are built can be made again: an IPA target, a usable bundle ID, a built game, and nothing running.
-    package var canExportBuiltGames: Bool { !running && exportsShell && !exportsOneGame && devices.ipaBundleIDValid && !exportableShellGames().isEmpty }
+    package var canExportBuiltGames: Bool { !running && exportsShell && !exportsOneGame && devices.ipaBundleIDValid && !builtShellGames().isEmpty }
 
     /// The shared app can be signed and installed from the frameworks already built: direct install mode with device and team ready.
     package var canInstallBuiltGames: Bool { !running && installsDirectly && !devices.exportIPA && !builtShellGames().isEmpty }
@@ -65,7 +58,7 @@ extension BuildStore {
     }
 
     private func exportBuiltGamesAfterStaleCheck() {
-        guard canExportBuiltGames, let last = exportableShellGames().last else { return }
+        guard canExportBuiltGames, let last = builtShellGames().last else { return }
         exportShell(framework: last.framework, titleID: last.titleID, name: last.name)
     }
 

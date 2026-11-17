@@ -254,19 +254,6 @@ package enum DriveCopy {
         }
     }
 
-    /// The name without the tags a dump's file name carries: `[…]` groups (`[0100…]`, `[v0]`, `[Base]`), a `(<title ID>)`, and a
-    /// site's name such as `(example.xyz)`. Each becomes a space, for the caller to fold.
-    package static func untag(_ name: String) -> String {
-        name.replacingOccurrences(of: "\\[[^\\]]*\\]|\\(\\s*[0-9A-Fa-f]{16}\\s*\\)|\\(\\s*[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+\\s*\\)",
-                                  with: " ", options: .regularExpression)
-    }
-
-    /// A game's name as the launcher shows it: without a dump's tags, runs of spaces folded, and no `+`, `-` or `_` left at either
-    /// end. Unlike a folder name it keeps every character, and a trailing dot ("Bros."). Empty when nothing is left.
-    package static func displayName(_ name: String) -> String {
-        untag(name).split(whereSeparator: \.isWhitespace).joined(separator: " ").trimmingCharacters(in: CharacterSet(charactersIn: " +-_"))
-    }
-
     package enum CopyError: Error, Equatable { case cancelled }
 
     /// Copies `files` into `destination`, using 1-second in-place partial trailer overwrite when an existing `DMROMFS1` image shares
@@ -668,9 +655,7 @@ package enum DriveCopy {
     private static func findLegacyTitleFolder(in folder: String, titleID: String, excludingName: String, fm: FileManager) -> String? {
         guard let entries = try? fm.contentsOfDirectory(atPath: folder) else { return nil }
         for entry in entries.sorted() where !entry.hasPrefix(".") {
-            // `<title ID>`, or `<game name> (<title ID>)` as this fork's drive copy named folders before it took this layout
-            let named = entry.uppercased().hasSuffix(" (\(titleID.uppercased()))")
-            guard entry.caseInsensitiveCompare(titleID) == .orderedSame || named,
+            guard entry.caseInsensitiveCompare(titleID) == .orderedSame,
                   entry.caseInsensitiveCompare(excludingName) != .orderedSame else { continue }
             let path = joinPath(folder, entry)
             if (try? fm.attributesOfItem(atPath: path)[.type]) as? FileAttributeType == .typeDirectory { return path }

@@ -35,9 +35,6 @@ package struct ExportSteps: View {
     private var oneGame: Bool { devices.exportOneGame }
     /// The shared app's IPA is signed for a team (a one-game IPA is always unsigned).
     private var signed: Bool { !oneGame && !devices.ipaTeam.isEmpty }
-    /// The shared app's games for the list under step 1, nil for a one-game IPA (it holds the build form's game alone).
-    private var contents: IPAContents? { oneGame ? nil : build.ipaContents }
-
 
     package var body: some View {
         let canExportBuilt = !oneGame && !build.running && build.exportsShell && !build.exportsOneGame
@@ -61,15 +58,8 @@ package struct ExportSteps: View {
                                 .help(loc.t("shell.exportBuiltNote"))
                         }
                         action(loc.t("shell.step1Button"), enabled: build.canStartBuildOrQueue && !build.running) { build.startBuildOrQueue() }
-                            .help(build.gameTitleID == nil ? "" : String(format: loc.t("shell.step1ButtonNote"), build.gameName))
                     }
                 }
-            }
-            if let contents {   // the shared app's games, so the player sees what both buttons pack
-                IPAGamesList(contents: contents, canChange: build.canManageShellGames,
-                             setIncluded: { build.setExcludedFromIPA($0, !$1) }, remove: { build.removeFromSharedApp($0) })
-                    .padding(.leading, ExportGrid.axis).padding(.trailing, ExportGrid.inset).padding(.bottom, ExportGrid.inset)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             CardDivider()
             step(2, sentDone ? .done : exported ? .current : .upcoming, title: loc.t("shell.step2Title"),

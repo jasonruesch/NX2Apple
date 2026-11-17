@@ -142,8 +142,7 @@ extension ShellInstaller {
 
     /// Steps 3 and 4 of the install, which the export shares: the library with this game, and the shell's project.
     /// Exactly one of `failure` and (`library`, `env`) is set. `notes` name the games left out because their framework is incomplete.
-    /// `leaveOut`: the export's excluded games (SharedAppGames), which stay in shell.json but not in the project. The install leaves none out.
-    func prepareShell(framework: String, titleID: String, name: String, leaveOut: Set<String> = [])
+    func prepareShell(framework: String, titleID: String, name: String)
         -> (library: ShellLibrary?, env: [String: String]?, failure: Outcome?, notes: [String]) {
         // 3: the library
         ShellInstall.sweepDiscarded(in: ShellInstall.frameworksMirror(root: root))
@@ -197,9 +196,6 @@ extension ShellInstaller {
             return (nil, nil, Outcome(ok: false, message: fmt("shell.projectFailed", error.localizedDescription)), [])
         }
 
-        let saved = library   // every game, as shell.json holds them: Xcode's earlier builds keep those
-        library = SharedAppGames.forExport(library, leavingOut: leaveOut, keeping: titleID)
-
         // 4: the project
         guard let package = ShellInstall.shellPackage(resources: resources, repo: repo) else {
             let looked = ([resources, repo].compactMap { $0 }.filter { !$0.isEmpty }).map { $0 + "/frontend-ios" }.joined(separator: ", ")
@@ -223,7 +219,7 @@ extension ShellInstaller {
         for (_, previous) in replaced { ShellInstall.discard(previous) }   // the script took the new frameworks
         ShellInstall.refreshProjectLinks(root: root, resources: resources, repo: repo)
         ShellInstall.writeProjectFrameworks(root: root, games: library.games)
-        ShellInstall.pruneEmbeddedFrameworks(root: root, keeping: saved.games)
+        ShellInstall.pruneEmbeddedFrameworks(root: root, keeping: library.games)
         end(Self.projectStageID, projectName, ok: true)
         return (library, env, nil, checked.notes)
     }
@@ -232,9 +228,7 @@ extension ShellInstaller {
     package func export(framework: String, titleID: String, name: String) -> Outcome {
         let fm = FileManager.default
         guard fm.fileExists(atPath: framework) else { return missingFramework(framework, name: name) }
-        // A game the player excluded and then built and exported is wanted again
-        if SharedAppGames.isExcluded(titleID, root: root) { try? SharedAppGames.setExcluded(titleID, false, root: root) }
-        let prepared = prepareShell(framework: framework, titleID: titleID, name: name, leaveOut: SharedAppGames.excluded(root: root))
+        let prepared = prepareShell(framework: framework, titleID: titleID, name: name)
         guard let library = prepared.library else { return prepared.failure! }
 
         // The build, in the export's own derived data: unsigned, or signed for the export's team
@@ -298,7 +292,6 @@ extension ShellInstaller {
             try? fm.removeItem(atPath: ipa)
             try fm.createDirectory(atPath: stage + "/Payload", withIntermediateDirectories: true)
             try fm.copyItem(at: app, to: stagedApp)
-            ShellExport.leaveOutOtherGames(in: stagedApp, library: library)
             let payload = stagedApp.deletingLastPathComponent()
             if try ShellExport.exceedsEntryLimit(in: payload, limit: entryLimit) {
                 let frameworks = library.games.map { URL(fileURLWithPath: $0.framework).lastPathComponent }
@@ -478,27 +471,15 @@ package enum ShellExport {
         return names
     }
 
-    /// The staged app holds only the library's games: Xcode's earlier build can still embed a game the export now leaves out.
-    package static func leaveOutOtherGames(in stagedApp: URL, library: ShellLibrary, fm: FileManager = .default) {
-        let keep = Set(library.games.map { URL(fileURLWithPath: $0.framework).lastPathComponent })
-        let folder = stagedApp.appendingPathComponent("Frameworks")
-        for item in (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
-        where item.hasPrefix("DmGame") && item.hasSuffix(".framework") && !keep.contains(item) {
-            try? fm.removeItem(at: folder.appendingPathComponent(item))
-        }
-    }
-
     /// Packs legacy loose `<framework>/msl/` trees into `msl-<UUID>.aar` when an already-built app exceeds the ZIP32 entry limit.
     /// Stripped frameworks without `msl/` are skipped at zero cost.
-    @discardableResult
     package static func packShaderLibraries(
         in stagedApp: URL,
         frameworkNames: [String],
         runArchive: ([String]) -> (status: Int32, output: String, lastError: String?),
         exitCodeMessage: (Int32) -> String
-    ) throws -> [URL] {
+    ) throws {
         let fm = FileManager.default
-        var changed: [URL] = []
         let frameworksDir = stagedApp.appendingPathComponent("Frameworks")
         var packedSet = Set<String>()
         for frameworkName in frameworkNames where packedSet.insert(frameworkName).inserted {
@@ -524,8 +505,6 @@ package enum ShellExport {
                 throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: why])
             }
             try fm.removeItem(at: mslURL)
-            changed.append(fwURL)
         }
-        return changed
     }
 }
